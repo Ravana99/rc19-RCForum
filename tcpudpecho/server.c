@@ -78,7 +78,9 @@ int main() {
         if (FD_ISSET(listenfd, &rset)) {
 
             len = sizeof(cliaddr);
-            if ((connfd = accept(listenfd, (struct sockaddr*)&cliaddr, &len)) == -1) exit1("accept");
+            do connfd = accept(listenfd, (struct sockaddr*)&cliaddr, &len); while (connfd == -1 && errno == EINTR);
+            if (connfd == -1) exit1("accept");
+            
             if ((childpid = fork()) == 0) {
                 close(listenfd);
                 memset(buffer, 0, sizeof buffer);
@@ -101,6 +103,8 @@ int main() {
             if (errcode == -1) exit1("close");
 
         }
+
+        sleep(0.01); // FIXES PARENT PROCESS WRITING FASTER THAN CHILD PROCESS: FIX ROOT PROBLEM
 
         if (FD_ISSET(udpfd, &rset)) {
             len = sizeof(cliaddr);
