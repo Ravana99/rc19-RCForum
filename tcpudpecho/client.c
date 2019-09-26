@@ -84,7 +84,6 @@ int main() {
 
     addrlen = sizeof(addr);
     if ((n = recvfrom(udpfd, buffer, 128, 0, (struct sockaddr*)&addr, &addrlen)) == -1) { write(1, "recvfrom: ", 10); write(1, strerror(errno), strlen(strerror(errno))); exit(1); }
-    // BUG: RECVFROM FAILS ABOUT HALF THE TIME
 
     write(1, "echo from udp: ", 15);
     write(1, buffer, n);
