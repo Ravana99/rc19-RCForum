@@ -100,12 +100,14 @@ int main() {
         }
 
         if (FD_ISSET(udpfd, &rset)) {
+            /*
             len = sizeof(cliaddr);
             memset(buffer, 0, sizeof buffer);
             if ((n = recvfrom(udpfd, buffer, sizeof buffer, 0, (struct sockaddr*)&cliaddr, &len)) == -1) exit(1);
             write(1, "received from udp: ", 19);
             write(1, buffer, strlen(buffer));
             if ((n = sendto(udpfd, buffer, sizeof(buffer), 0, (struct sockaddr*)&cliaddr, len)) == -1) exit(1);
+            */
         }
     }   
 
