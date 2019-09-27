@@ -11,13 +11,38 @@
 #include <sys/time.h>
 
 #define PORT "58001"
-#define MAXBUFFER 512
 #define max(A, B) ((A) >= (B) ? (A) : (B))
+
+int receiveudp(int udpfd, char* buffer, struct sockaddr* cliaddr, socklen_t* len) {
+    char request[128], response[1024];
+    int id;
+
+    if (recvfrom(udpfd, buffer, sizeof buffer, 0, cliaddr, len) == -1) return -1;
+    write(1, buffer, 11);
+    sscanf(buffer, "%s", request);
+
+    if (!strcmp(request, "REG")) {
+        sscanf(buffer, "REG %d", &id);
+        if (id > 9999 && id < 100000) strcpy(response, "RGR OK\n");
+        else strcpy(response, "RGR NOK\n");
+
+    } else if (!strcmp(request, "LTP")) {
+                
+    } else if (!strcmp(request, "PTP")) {
+
+    } else if (!strcmp(request, "LQU")) {
+
+    } else {
+        strcpy(response, "ERR\n");
+    }
+
+    if (sendto(udpfd, response, strlen(response) + 1, 0, cliaddr, *len) == -1) return -1;
+}
 
 int main() {
 
     int listenfd, connfd, udpfd, nready, maxfdp1, errcode, n;
-    char buffer[MAXBUFFER];
+    char buffer[1024];
     fd_set rset;
     struct sockaddr_in cliaddr;
     struct addrinfo hintstcp, hintsudp, *restcp, *resudp;
@@ -51,14 +76,14 @@ int main() {
 
     /* tcp socket */
     if ((listenfd = socket(restcp->ai_family, restcp->ai_socktype, restcp->ai_protocol)) == -1) exit(1);
-/**/if (setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &(int){ 1 }, sizeof(int)) < 0) exit(1);
+  //if (setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &(int){ 1 }, sizeof(int)) < 0) exit(1);
     if (bind(listenfd, restcp->ai_addr, restcp->ai_addrlen) == -1) exit(1);
     if (listen(listenfd, 5) == -1) exit(1);
 
     /* udp socket */
     if ((udpfd = socket(resudp->ai_family, resudp->ai_socktype, resudp->ai_protocol)) == -1) exit(1);
     if ((errcode = bind(udpfd, resudp->ai_addr, resudp->ai_addrlen)) == -1) exit(1);
-/**/if (setsockopt(udpfd, SOL_SOCKET, SO_REUSEADDR, &(int){ 1 }, sizeof(int)) < 0) exit(1);
+  //if (setsockopt(udpfd, SOL_SOCKET, SO_REUSEADDR, &(int){ 1 }, sizeof(int)) < 0) exit(1);
 
     FD_ZERO(&rset);
     maxfdp1 = max(listenfd, udpfd) + 1;
@@ -100,14 +125,9 @@ int main() {
         }
 
         if (FD_ISSET(udpfd, &rset)) {
-            /*
             len = sizeof(cliaddr);
             memset(buffer, 0, sizeof buffer);
-            if ((n = recvfrom(udpfd, buffer, sizeof buffer, 0, (struct sockaddr*)&cliaddr, &len)) == -1) exit(1);
-            write(1, "received from udp: ", 19);
-            write(1, buffer, strlen(buffer));
-            if ((n = sendto(udpfd, buffer, sizeof(buffer), 0, (struct sockaddr*)&cliaddr, len)) == -1) exit(1);
-            */
+            if (receiveudp(udpfd, buffer, (struct sockaddr*)&cliaddr, &len) == -1) exit(1);
         }
     }   
 
