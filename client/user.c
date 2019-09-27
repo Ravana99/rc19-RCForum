@@ -11,18 +11,25 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-#define PORT "58001"
+#define PORT "58011"
+
+int sendudp(int udpfd, struct addrinfo** resudp, char* message, char* response) {
+    struct sockaddr_in addr;
+    socklen_t addrlen;
+
+    if (sendto(udpfd, message, strlen(message) + 1, 0, (*resudp)->ai_addr, (*resudp)->ai_addrlen) == -1) return -1;
+    addrlen = sizeof(addr);
+    return recvfrom(udpfd, response, 1024, 0, (struct sockaddr*)&addr, &addrlen);
+}
 
 int main() {
     struct addrinfo hintstcp, hintsudp, *restcp, *resudp;
     ssize_t n, nbytes, nleft, nwritten, nread;
     int tcpfd, udpfd, errcode, userid = -1, topicnum = -1;
     struct sigaction act;
-    struct sockaddr_in addr;
-    socklen_t addrlen;
-    char hostname[128], buffer[128], received[128], command[128], argbuffer[128], input[1024];
+    
+    char hostname[128], buffer[128], received[128], command[128], argbuffer[128], input[1024], message[1024], response[1024];
     char *inputptr, *ptr;
-
 
     memset(buffer, 0, sizeof buffer);
     memset(received, 0, sizeof received);
@@ -36,6 +43,7 @@ int main() {
     hintsudp.ai_socktype = SOCK_DGRAM;
     hintsudp.ai_flags = AI_NUMERICSERV;
 
+    // Ignoring the SIGPIPE signal
     memset(&act, 0, sizeof act);
     act.sa_handler = SIG_IGN;
     if (sigaction(SIGPIPE, &act, NULL) == -1) exit(1);
@@ -45,12 +53,15 @@ int main() {
     if ((errcode = getaddrinfo(hostname, PORT, &hintstcp, &restcp)) != 0) exit(1);
     if ((errcode = getaddrinfo(hostname, PORT, &hintsudp, &resudp)) != 0) exit(1);
 
+    if ((tcpfd = socket(restcp->ai_family, restcp->ai_socktype, restcp->ai_protocol)) == -1) exit(1);
+    if ((udpfd = socket(resudp->ai_family, resudp->ai_socktype, resudp->ai_protocol)) == -1) exit(1);
+
     while(1) {
         fgets(input, 1024, stdin);
         if (!strcmp(input, "\n")) continue;
         sscanf(input, "%s", command);
         inputptr = input;
-        inputptr += strlen(command) + 1;
+        inputptr += strlen(command) + 1; // Points to arguments of the command
 
         if (!strcmp(command, "register") || !strcmp(command, "reg")) {
             sscanf(inputptr, "%s", argbuffer);
@@ -58,11 +69,21 @@ int main() {
                 printf("Invalid arguments\n");
                 continue;
             }
+            strcpy(message, "REG ");
+            strcat(message, argbuffer);
+            strcat(message, "\n\0");
 
-            //TODO: NOT YET IMPLEMENTED
-            printf("User \"%d\" registered\n", userid);
+            if ((n = sendudp(udpfd, &resudp, message, response)) == -1) exit(1);
+            response[n] = '\0'; // Appends a '\0' to the response so it can be used in strcmp
 
-        } else if (userid == -1) {
+            if (!strcmp(response, "RGR OK\n"))
+                printf("User \"%d\" registered\n", userid);
+            else {
+                printf("Registration failed\n");
+                userid = -1;
+            }
+
+        } else if (userid <= 0) {
             printf("User not registered\n");
             continue;
 
@@ -108,8 +129,6 @@ int main() {
 
         else printf("Invalid command\n");
 
-        inputptr = input;
-
         memset(argbuffer, 0, sizeof buffer);
         memset(input, 0, sizeof buffer);
         memset(command, 0, sizeof buffer);
@@ -117,7 +136,7 @@ int main() {
 
     freeaddrinfo(restcp);
     freeaddrinfo(resudp);
-    //close(udpfd);
+    close(udpfd);
 
     exit(0);
 }

@@ -56,14 +56,14 @@ int main() {
 
     /* tcp socket */
     if ((listenfd = socket(restcp->ai_family, restcp->ai_socktype, restcp->ai_protocol)) == -1) exit1("socket");
-/**/if (setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &(int){ 1 }, sizeof(int)) < 0) exit1("setsockopt");
+  //if (setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &(int){ 1 }, sizeof(int)) < 0) exit1("setsockopt");
     if (bind(listenfd, restcp->ai_addr, restcp->ai_addrlen) == -1) exit1("bind");
     if (listen(listenfd, 5) == -1) exit1("listen");
 
     /* udp socket */
     if ((udpfd = socket(resudp->ai_family, resudp->ai_socktype, resudp->ai_protocol)) == -1) exit1("socket");
     if ((errcode = bind(udpfd, resudp->ai_addr, resudp->ai_addrlen)) == -1) exit1("bind");
-/**/if (setsockopt(udpfd, SOL_SOCKET, SO_REUSEADDR, &(int){ 1 }, sizeof(int)) < 0) exit1("setsockopt");
+  //if (setsockopt(udpfd, SOL_SOCKET, SO_REUSEADDR, &(int){ 1 }, sizeof(int)) < 0) exit1("setsockopt");
 
     FD_ZERO(&rset);
     maxfdp1 = max(listenfd, udpfd) + 1;
