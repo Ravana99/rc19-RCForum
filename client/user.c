@@ -11,16 +11,15 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-#define PORT "58001"
+#define PORT "58011"
 
 int sendudp(int udpfd, struct addrinfo** resudp, char* message, char* response) {
     struct sockaddr_in addr;
     socklen_t addrlen;
 
-    printf("%s", message);
     if (sendto(udpfd, message, strlen(message) + 1, 0, (*resudp)->ai_addr, (*resudp)->ai_addrlen) == -1) return -1;
     addrlen = sizeof(addr);
-    return recvfrom(udpfd, response, sizeof response, 0, (struct sockaddr*)&addr, &addrlen);
+    return recvfrom(udpfd, response, 1024, 0, (struct sockaddr*)&addr, &addrlen);
 }
 
 int main() {

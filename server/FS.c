@@ -10,21 +10,27 @@
 #include <signal.h>
 #include <sys/time.h>
 
-#define PORT "58001"
+#define PORT "58011"
 #define max(A, B) ((A) >= (B) ? (A) : (B))
 
-int receiveudp(int udpfd, char* buffer, struct sockaddr* cliaddr, socklen_t* len) {
+int receiveudp(int udpfd, char* buffer, struct sockaddr_in* cliaddr, socklen_t* len) {
     char request[128], response[1024];
     int id;
 
-    if (recvfrom(udpfd, buffer, sizeof buffer, 0, cliaddr, len) == -1) return -1;
-    write(1, buffer, 11);
+    if (recvfrom(udpfd, buffer, 1024, 0, (struct sockaddr*)cliaddr, len) == -1) return -1;
     sscanf(buffer, "%s", request);
 
     if (!strcmp(request, "REG")) {
         sscanf(buffer, "REG %d", &id);
-        if (id > 9999 && id < 100000) strcpy(response, "RGR OK\n");
-        else strcpy(response, "RGR NOK\n");
+        printf("User %d (IP %s) trying to register... ", id, inet_ntoa(cliaddr->sin_addr));
+        if (id > 9999 && id < 100000) {
+            strcpy(response, "RGR OK\n");
+            printf("success\n");
+        }
+        else {
+            strcpy(response, "RGR NOK\n");
+            printf("denied\n");
+        }
 
     } else if (!strcmp(request, "LTP")) {
                 
@@ -36,7 +42,7 @@ int receiveudp(int udpfd, char* buffer, struct sockaddr* cliaddr, socklen_t* len
         strcpy(response, "ERR\n");
     }
 
-    if (sendto(udpfd, response, strlen(response) + 1, 0, cliaddr, *len) == -1) return -1;
+    return sendto(udpfd, response, strlen(response) + 1, 0, (struct sockaddr*)cliaddr, *len);
 }
 
 int main() {
@@ -127,7 +133,7 @@ int main() {
         if (FD_ISSET(udpfd, &rset)) {
             len = sizeof(cliaddr);
             memset(buffer, 0, sizeof buffer);
-            if (receiveudp(udpfd, buffer, (struct sockaddr*)&cliaddr, &len) == -1) exit(1);
+            if (receiveudp(udpfd, buffer, &cliaddr, &len) == -1) exit(1);
         }
     }   
 
