@@ -9,15 +9,17 @@
 #include <errno.h>
 #include <signal.h>
 #include <sys/time.h>
+#include <dirent.h>
 
 #define PORT "58011"
 #define max(A, B) ((A) >= (B) ? (A) : (B))
 
 int receiveudp(int udpfd, char* buffer, struct sockaddr_in* cliaddr, socklen_t* len) {
     char request[128], response[1024];
-    int id;
+    int id, n;
 
-    if (recvfrom(udpfd, buffer, 1024, 0, (struct sockaddr*)cliaddr, len) == -1) return -1;
+    if ((n = recvfrom(udpfd, buffer, 1024, 0, (struct sockaddr*)cliaddr, len)) == -1) return -1;
+    buffer[n] = '\0'; // Appends a '\0' to the message so it can be used in strcmp
     sscanf(buffer, "%s", request);
 
     if (!strcmp(request, "REG")) {
@@ -33,6 +35,37 @@ int receiveudp(int udpfd, char* buffer, struct sockaddr_in* cliaddr, socklen_t* 
         }
 
     } else if (!strcmp(request, "LTP")) {
+
+        DIR *dir;
+	    struct dirent *entry;
+        int n = 0;
+        char topic_amount[16], topic_buffer[128], topic_name[16], topic_id[16];
+        char delim[2] = "_";
+
+        printf("User is listing the available topics\n");
+        strcpy(response, "LTR ");
+
+	    if ((dir = opendir("server/topics")) == NULL) return -1;
+		while ((entry = readdir(dir)) != NULL) n++;
+        n -= 2; // Disregards directories . and ..
+		closedir(dir);
+
+        sprintf(topic_amount, "%d", n);
+        strcat(response, topic_amount);
+
+        if ((dir = opendir("server/topics")) == NULL) return -1;
+        readdir(dir); // Skips directory .
+        readdir(dir); // Skips directory ..
+		while ((entry = readdir(dir)) != NULL) {
+            strcpy(topic_name, strtok(entry->d_name, delim));
+            strcpy(topic_id, strtok(NULL, delim));
+            sprintf(topic_buffer, " %s:%s", topic_name, topic_id);
+            strcat(response, topic_buffer);
+        }
+        strcat(response, "\n");
+
+		closedir(dir);
+
                 
     } else if (!strcmp(request, "PTP")) {
 
