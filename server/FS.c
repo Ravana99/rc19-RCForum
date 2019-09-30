@@ -1,3 +1,5 @@
+/* Group 39 - Joao Fonseca 89476, Tiago Pires 89544, Tomas Lopes 89552 */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
@@ -11,7 +13,6 @@
 #include <sys/time.h>
 #include <dirent.h>
 
-#define PORT "58011"
 #define max(A, B) ((A) >= (B) ? (A) : (B))
 
 int receiveudp(int udpfd, char* buffer, struct sockaddr_in* cliaddr, socklen_t* len) {
@@ -57,7 +58,8 @@ int receiveudp(int udpfd, char* buffer, struct sockaddr_in* cliaddr, socklen_t* 
         readdir(dir); // Skips directory .
         readdir(dir); // Skips directory ..
 		while ((entry = readdir(dir)) != NULL) {
-            strcpy(topic_name, strtok(entry->d_name, delim));
+            strtok(entry->d_name, delim);
+            strcpy(topic_name, strtok(NULL, delim));
             strcpy(topic_id, strtok(NULL, delim));
             sprintf(topic_buffer, " %s:%s", topic_name, topic_id);
             strcat(response, topic_buffer);
@@ -78,10 +80,10 @@ int receiveudp(int udpfd, char* buffer, struct sockaddr_in* cliaddr, socklen_t* 
     return sendto(udpfd, response, strlen(response) + 1, 0, (struct sockaddr*)cliaddr, *len);
 }
 
-int main() {
+int main(int argc, char** argv) {
 
     int listenfd, connfd, udpfd, nready, maxfdp1, errcode, n;
-    char buffer[1024];
+    char buffer[1024], port[16];
     fd_set rset;
     struct sockaddr_in cliaddr;
     struct addrinfo hintstcp, hintsudp, *restcp, *resudp;
@@ -109,8 +111,21 @@ int main() {
     act2.sa_handler = SIG_IGN;
     if (sigaction(SIGCHLD, &act2, NULL) == -1) exit(1);
 
-    if ((errcode = getaddrinfo(NULL, PORT, &hintstcp, &restcp)) != 0) exit(1);
-    if ((errcode = getaddrinfo(NULL, PORT, &hintsudp, &resudp)) != 0) exit(1);
+    strcpy(port, "58039");
+    if (argc == 3) {
+        if (!strcmp(argv[1], "-p"))
+            strcpy(port, argv[2]);
+        else {
+            printf("Invalid command line arguments\n");
+            exit(1);
+        }
+    } else if (argc != 1) {
+        printf("Invalid command line arguments\n");
+        exit(1);
+    }
+
+    if ((errcode = getaddrinfo(NULL, port, &hintstcp, &restcp)) != 0) exit(1);
+    if ((errcode = getaddrinfo(NULL, port, &hintsudp, &resudp)) != 0) exit(1);
     
 
     /* tcp socket */

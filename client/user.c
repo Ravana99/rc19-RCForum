@@ -1,3 +1,5 @@
+/* Group 39 - Joao Fonseca 89476, Tiago Pires 89544, Tomas Lopes 89552 */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
@@ -10,8 +12,6 @@
 #include <signal.h>
 #include <sys/time.h>
 #include <unistd.h>
-
-#define PORT "58011"
 
 struct topic {
     char name[16];
@@ -27,13 +27,13 @@ int sendudp(int udpfd, struct addrinfo** resudp, char* message, char* response) 
     return recvfrom(udpfd, response, 1024, 0, (struct sockaddr*)&addr, &addrlen);
 }
 
-int main() {
+int main(int argc, char** argv) {
     struct addrinfo hintstcp, hintsudp, *restcp, *resudp;
     ssize_t n, nbytes, nleft, nwritten, nread;
     int tcpfd, udpfd, errcode, userid = -1, topic_selected = -1, topic_amount = 0;
     struct sigaction act;
     
-    char hostname[128], buffer[128], received[128], command[128], argbuffer[128], input[1024], message[1024], response[1024];
+    char port[16], hostname[128], buffer[128], received[128], command[128], argbuffer[128], input[1024], message[1024], response[1024];
     char *inputptr, *ptr;
 
     struct topic topic_list[99+1]; // First entry is left empty to facilitate indexing
@@ -55,11 +55,38 @@ int main() {
     memset(&act, 0, sizeof act);
     act.sa_handler = SIG_IGN;
     if (sigaction(SIGPIPE, &act, NULL) == -1) exit(1);
-    
-    if (gethostname(hostname, 128) == -1) exit(1);
 
-    if ((errcode = getaddrinfo(hostname, PORT, &hintstcp, &restcp)) != 0) exit(1);
-    if ((errcode = getaddrinfo(hostname, PORT, &hintsudp, &resudp)) != 0) exit(1);
+    strcpy(hostname, "localhost");
+    strcpy(port, "58039");
+    if (argc == 3) {
+        if (!strcmp(argv[1], "-n"))
+            strcpy(hostname, argv[2]);
+        else if (!strcmp(argv[1], "-p"))
+            strcpy(port, argv[2]);
+        else {
+            printf("Invalid command line arguments\n");
+            exit(1);
+        }
+
+    } else if (argc == 5) {
+        if (!strcmp(argv[1], "-n") && !strcmp(argv[3], "-p")) {
+            strcpy(hostname, argv[2]);
+            strcpy(port, argv[4]);
+        } else if (!strcmp(argv[1], "-p") && !strcmp(argv[3], "-n")) {
+            strcpy(port, argv[2]);
+            strcpy(hostname, argv[4]);
+        } else {
+            printf("Invalid command line arguments\n");
+            exit(1);
+        }
+
+    } else if (argc != 1) {
+        printf("Invalid command line arguments\n");
+        exit(1);
+    }
+    
+    if ((errcode = getaddrinfo(hostname, port, &hintstcp, &restcp)) != 0) exit(1);
+    if ((errcode = getaddrinfo(hostname, port, &hintsudp, &resudp)) != 0) exit(1);
 
     if ((tcpfd = socket(restcp->ai_family, restcp->ai_socktype, restcp->ai_protocol)) == -1) exit(1);
     if ((udpfd = socket(resudp->ai_family, resudp->ai_socktype, resudp->ai_protocol)) == -1) exit(1);
