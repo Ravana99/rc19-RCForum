@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <sys/socket.h>
 #include <netdb.h>
 #include <arpa/inet.h>
@@ -12,14 +13,24 @@
 #include <signal.h>
 #include <sys/time.h>
 #include <dirent.h>
+#include <ctype.h>
 
 #define max(A, B) ((A) >= (B) ? (A) : (B))
 
+int topic_amount = 0;
+
+int isAlphanumeric (char* str) {
+    for (int i=0; str[i] != '\0'; i++)
+        if (!isalpha(str[i]) && !isdigit(str[i]))
+            return 0;
+    return 1;
+}
+
 int receiveudp(int udpfd, char* buffer, struct sockaddr_in* cliaddr, socklen_t* len) {
-    char request[128], response[1024];
+    char request[128], response[2048];
     int id, n;
 
-    if ((n = recvfrom(udpfd, buffer, 1024, 0, (struct sockaddr*)cliaddr, len)) == -1) return -1;
+    if ((n = recvfrom(udpfd, buffer, 2048, 0, (struct sockaddr*)cliaddr, len)) == -1) return -1;
     buffer[n] = '\0'; // Appends a '\0' to the message so it can be used in strcmp
     sscanf(buffer, "%s", request);
 
@@ -39,20 +50,14 @@ int receiveudp(int udpfd, char* buffer, struct sockaddr_in* cliaddr, socklen_t* 
 
         DIR *dir;
 	    struct dirent *entry;
-        int n = 0;
-        char topic_amount[16], topic_buffer[128], topic_name[16], topic_id[16];
+        char topic_count[16], topic_buffer[128], topic_name[16], topic_id[16];
         char delim[2] = "_";
 
         printf("User is listing the available topics\n");
         strcpy(response, "LTR ");
 
-	    if ((dir = opendir("server/topics")) == NULL) return -1;
-		while ((entry = readdir(dir)) != NULL) n++;
-        n -= 2; // Disregards directories . and ..
-		closedir(dir);
-
-        sprintf(topic_amount, "%d", n);
-        strcat(response, topic_amount);
+        sprintf(topic_count, "%d", topic_amount);
+        strcat(response, topic_count);
 
         if ((dir = opendir("server/topics")) == NULL) return -1;
         readdir(dir); // Skips directory .
@@ -70,6 +75,48 @@ int receiveudp(int udpfd, char* buffer, struct sockaddr_in* cliaddr, socklen_t* 
 
                 
     } else if (!strcmp(request, "PTP")) {
+        DIR *dir;
+	    struct dirent *entry;
+        char topic_name[128], existing_topic[16], pathname[128];
+        int duplicate_topic = 0;
+        char delim[2] = "_";
+        sscanf(buffer, "PTP %d %s", &id, topic_name);
+
+        printf("User %d is proposing topic %s... ", id, topic_name);
+
+        if (strlen(topic_name) > 10 || !isAlphanumeric(topic_name)) {
+            printf("invalid\n");
+            strcpy(response, "PTR NOK\n");
+        } else {
+
+            if ((dir = opendir("server/topics")) == NULL) return -1;
+            readdir(dir); // Skips directory .
+            readdir(dir); // Skips directory ..
+            while ((entry = readdir(dir)) != NULL) {
+                strtok(entry->d_name, delim);
+                strcpy(existing_topic, strtok(NULL, delim));
+                if (!strcmp(existing_topic, topic_name)) {
+                    duplicate_topic = 1;
+                    break;
+                }
+            }
+            if (topic_amount >= 99) {
+                printf("full\n");
+                strcpy(response, "PTR FUL\n");
+            } else if (duplicate_topic) {
+                printf("duplicate\n");
+                strcpy(response, "PTR DUP\n");
+            } else {
+                printf("success\n");
+                topic_amount++;
+                if (topic_amount < 10) sprintf(pathname, "server/topics/0%d_%s_%d", topic_amount, topic_name, id);
+                else sprintf(pathname, "server/topics/%d_%s_%d", topic_amount, topic_name, id);
+                printf("%s\n", pathname);
+                if (mkdir(pathname, 0666) == -1) return -1; // Enables R/W for all users
+                strcpy(response, "PTR OK\n");
+            }
+            closedir(dir);
+        }
 
     } else if (!strcmp(request, "LQU")) {
 
@@ -83,7 +130,7 @@ int receiveudp(int udpfd, char* buffer, struct sockaddr_in* cliaddr, socklen_t* 
 int main(int argc, char** argv) {
 
     int listenfd, connfd, udpfd, nready, maxfdp1, errcode, n;
-    char buffer[1024], port[16];
+    char buffer[2048], port[16];
     fd_set rset;
     struct sockaddr_in cliaddr;
     struct addrinfo hintstcp, hintsudp, *restcp, *resudp;
@@ -92,6 +139,8 @@ int main(int argc, char** argv) {
     char *ptr;
     struct sigaction act, act2;
     pid_t childpid;
+    DIR *dir;
+	struct dirent *entry;
     
     memset(buffer, 0, sizeof buffer);
 
@@ -123,6 +172,11 @@ int main(int argc, char** argv) {
         printf("Invalid command line arguments\n");
         exit(1);
     }
+
+    if ((dir = opendir("server/topics")) == NULL) exit(1);
+	while ((entry = readdir(dir)) != NULL) topic_amount++;
+    topic_amount -= 2; // Disregards directories . and ..
+	closedir(dir);
 
     if ((errcode = getaddrinfo(NULL, port, &hintstcp, &restcp)) != 0) exit(1);
     if ((errcode = getaddrinfo(NULL, port, &hintsudp, &resudp)) != 0) exit(1);

@@ -24,7 +24,7 @@ int sendudp(int udpfd, struct addrinfo** resudp, char* message, char* response) 
 
     if (sendto(udpfd, message, strlen(message) + 1, 0, (*resudp)->ai_addr, (*resudp)->ai_addrlen) == -1) return -1;
     addrlen = sizeof(addr);
-    return recvfrom(udpfd, response, 1024, 0, (struct sockaddr*)&addr, &addrlen);
+    return recvfrom(udpfd, response, 2048, 0, (struct sockaddr*)&addr, &addrlen);
 }
 
 int main(int argc, char** argv) {
@@ -33,7 +33,7 @@ int main(int argc, char** argv) {
     int tcpfd, udpfd, errcode, userid = -1, topic_selected = -1, topic_amount = 0;
     struct sigaction act;
     
-    char port[16], hostname[128], buffer[128], received[128], command[128], argbuffer[128], input[1024], message[1024], response[1024];
+    char port[16], hostname[128], buffer[128], received[128], command[128], argbuffer[128], input[2048], message[2048], response[2048];
     char *inputptr, *ptr;
 
     struct topic topic_list[99+1]; // First entry is left empty to facilitate indexing
@@ -92,7 +92,7 @@ int main(int argc, char** argv) {
     if ((udpfd = socket(resudp->ai_family, resudp->ai_socktype, resudp->ai_protocol)) == -1) exit(1);
 
     while(1) {
-        fgets(input, 1024, stdin);
+        fgets(input, 2048, stdin);
         if (!strcmp(input, "\n")) continue;
         sscanf(input, "%s", command);
         inputptr = input;
@@ -162,11 +162,28 @@ int main(int argc, char** argv) {
             } else
                 printf("Selected topic: %s (%d)\n", topic_list[topic_selected].name, topic_list[topic_selected].id);
 
+
         } else if (!strcmp(command, "topic_propose") || !strcmp(command, "tp")) {
             sscanf(inputptr, "%s", argbuffer);
 
-            //TODO: NOT YET IMPLEMENTED
-            printf("TOPIC PROPOSED: %s\n", argbuffer);
+            sprintf(message, "PTP %d %s\n", userid, argbuffer);
+
+            if ((n = sendudp(udpfd, &resudp, message, response)) == -1) exit(1);
+            response[n] = '\0';
+
+            if (!strcmp(response, "PTR NOK\n"))
+                printf("Failed to propose topic - check if topic name is alphanumeric and if it's at most 10 characters long\n");
+            else if (!strcmp(response, "PTR DUP\n"))
+                printf("Failed to propose topic - topic already exists\n");
+            else if (!strcmp(response, "PTR FUL\n"))
+                printf("Failed to propose topic - topic list full\n");
+            else {
+                printf("Topic proposed successfully\n");
+                topic_amount++;
+                strcpy(topic_list[topic_amount].name, argbuffer);
+                topic_list[topic_amount].id = userid;
+                topic_selected = topic_amount;
+            }
 
         } else if (!strcmp(command, "question_list") || !strcmp(command, "ql")) {
             if (topic_selected == -1) {
