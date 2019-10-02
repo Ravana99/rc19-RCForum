@@ -13,30 +13,34 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-struct topic {
+struct topic
+{
     char name[16];
     int id;
 };
 
-int sendudp(int udpfd, struct addrinfo** resudp, char* message, char* response) {
+int sendudp(int udpfd, struct addrinfo **resudp, char *message, char *response)
+{
     struct sockaddr_in addr;
     socklen_t addrlen;
 
-    if (sendto(udpfd, message, strlen(message), 0, (*resudp)->ai_addr, (*resudp)->ai_addrlen) == -1) return -1;
+    if (sendto(udpfd, message, strlen(message), 0, (*resudp)->ai_addr, (*resudp)->ai_addrlen) == -1)
+        return -1;
     addrlen = sizeof(addr);
-    return recvfrom(udpfd, response, 2048, 0, (struct sockaddr*)&addr, &addrlen);
+    return recvfrom(udpfd, response, 2048, 0, (struct sockaddr *)&addr, &addrlen);
 }
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv)
+{
     struct addrinfo hintstcp, hintsudp, *restcp, *resudp;
     ssize_t n, nbytes, nleft, nwritten, nread;
     int tcpfd, udpfd, errcode, userid = -1, topic_selected = -1, topic_amount = 0;
     struct sigaction act;
-    
+
     char port[16], hostname[128], buffer[128], received[128], command[128], argbuffer[128], input[2048], message[2048], response[2048];
     char *inputptr, *ptr;
 
-    struct topic topic_list[99+1]; // First entry is left empty to facilitate indexing
+    struct topic topic_list[99 + 1]; // First entry is left empty to facilitate indexing
     memset(topic_list, 0, sizeof topic_list);
 
     memset(buffer, 0, sizeof buffer);
@@ -54,119 +58,143 @@ int main(int argc, char** argv) {
     // Ignoring the SIGPIPE signal
     memset(&act, 0, sizeof act);
     act.sa_handler = SIG_IGN;
-    if (sigaction(SIGPIPE, &act, NULL) == -1) exit(1);
+    if (sigaction(SIGPIPE, &act, NULL) == -1)
+        exit(1);
 
     strcpy(hostname, "localhost");
     strcpy(port, "58039");
-    if (argc == 3) {
+    if (argc == 3)
+    {
         if (!strcmp(argv[1], "-n"))
             strcpy(hostname, argv[2]);
         else if (!strcmp(argv[1], "-p"))
             strcpy(port, argv[2]);
-        else {
+        else
+        {
             printf("Invalid command line arguments\n");
             exit(1);
         }
-
-    } else if (argc == 5) {
-        if (!strcmp(argv[1], "-n") && !strcmp(argv[3], "-p")) {
+    }
+    else if (argc == 5)
+    {
+        if (!strcmp(argv[1], "-n") && !strcmp(argv[3], "-p"))
+        {
             strcpy(hostname, argv[2]);
             strcpy(port, argv[4]);
-        } else if (!strcmp(argv[1], "-p") && !strcmp(argv[3], "-n")) {
+        }
+        else if (!strcmp(argv[1], "-p") && !strcmp(argv[3], "-n"))
+        {
             strcpy(port, argv[2]);
             strcpy(hostname, argv[4]);
-        } else {
+        }
+        else
+        {
             printf("Invalid command line arguments\n");
             exit(1);
         }
-
-    } else if (argc != 1) {
+    }
+    else if (argc != 1)
+    {
         printf("Invalid command line arguments\n");
         exit(1);
     }
-    
-    if ((errcode = getaddrinfo(hostname, port, &hintstcp, &restcp)) != 0) exit(1);
-    if ((errcode = getaddrinfo(hostname, port, &hintsudp, &resudp)) != 0) exit(1);
 
-    if ((tcpfd = socket(restcp->ai_family, restcp->ai_socktype, restcp->ai_protocol)) == -1) exit(1);
-    if ((udpfd = socket(resudp->ai_family, resudp->ai_socktype, resudp->ai_protocol)) == -1) exit(1);
+    if ((errcode = getaddrinfo(hostname, port, &hintstcp, &restcp)) != 0)
+        exit(1);
+    if ((errcode = getaddrinfo(hostname, port, &hintsudp, &resudp)) != 0)
+        exit(1);
 
-    while(1) {
+    if ((tcpfd = socket(restcp->ai_family, restcp->ai_socktype, restcp->ai_protocol)) == -1)
+        exit(1);
+    if ((udpfd = socket(resudp->ai_family, resudp->ai_socktype, resudp->ai_protocol)) == -1)
+        exit(1);
+
+    while (1)
+    {
         fgets(input, 2048, stdin);
-        if (!strcmp(input, "\n")) continue;
+        if (!strcmp(input, "\n"))
+            continue;
         sscanf(input, "%s", command);
         inputptr = input;
         inputptr += strlen(command) + 1; // Points to arguments of the command
 
-        if (!strcmp(command, "exit")) break;
+        if (!strcmp(command, "exit"))
+            break;
 
-        else if (!strcmp(command, "register") || !strcmp(command, "reg")) {
+        else if (!strcmp(command, "register") || !strcmp(command, "reg"))
+        {
             sscanf(inputptr, "%s", argbuffer);
-            if ((userid = atoi(argbuffer)) == 0) {
+            userid = atoi(argbuffer);
+            /*if ((userid = atoi(argbuffer)) == 0) {
                 printf("Invalid arguments\n");
                 continue;
-            }
-            sprintf(message, "REG %s\n\0", argbuffer);
-
-            if ((n = sendudp(udpfd, &resudp, message, response)) == -1) exit(1);
+            }*/
+            sprintf(message, "REG %s\n", argbuffer);
+            if ((n = sendudp(udpfd, &resudp, message, response)) == -1)
+                exit(1);
             response[n] = '\0'; // Appends a '\0' to the response so it can be used in strcmp
 
             if (!strcmp(response, "RGR OK\n"))
                 printf("User \"%d\" registered\n", userid);
-            else {
+            else
+            {
                 printf("Registration failed\n");
                 userid = -1;
             }
-
-
-        } else if (userid <= 0) {
+        }
+        else if (userid <= 0)
+        {
             printf("User not registered\n");
             continue;
-
-
-
-        } else if (!strcmp(command, "topic_list") || !strcmp(command, "tl")) {
+        }
+        else if (!strcmp(command, "topic_list") || !strcmp(command, "tl"))
+        {
             char delim[3] = ": ";
             int n;
-            strcpy(message, "LTP\n\0");
-
-            if ((n = sendudp(udpfd, &resudp, message, response)) == -1) exit(1);
+            strcpy(message, "LTP\n");
+            if ((n = sendudp(udpfd, &resudp, message, response)) == -1)
+                exit(1);
             response[n] = '\0';
 
             strtok(response, delim);
             n = atoi(strtok(NULL, delim));
             topic_amount = n;
-            for (int i = 1; i <= n; i++) {
+            for (int i = 1; i <= n; i++)
+            {
                 strcpy(topic_list[i].name, strtok(NULL, delim));
                 topic_list[i].id = atoi(strtok(NULL, delim));
             }
             printf("Available topics:\n");
             for (int i = 1; i <= n; i++)
                 printf("%d - %s (proposed by %d)\n", i, topic_list[i].name, topic_list[i].id);
-            
-
-        } else if (!strcmp(command, "topic_select") || !strcmp(command, "ts")) {
+        }
+        else if (!strcmp(command, "topic_select") || !strcmp(command, "ts"))
+        {
             int old = topic_selected;
             sscanf(inputptr, "%s", argbuffer);
-            if ((topic_selected = atoi(argbuffer)) == 0) {
+            if ((topic_selected = atoi(argbuffer)) == 0)
+            {
                 printf("Invalid arguments\n");
                 topic_selected = old;
                 continue;
             }
 
-            if (topic_selected <= 0 || topic_selected > topic_amount) {
+            if (topic_selected <= 0 || topic_selected > topic_amount)
+            {
                 printf("Invalid topic number\n");
                 topic_selected = old;
-            } else
+            }
+            else
                 printf("Selected topic: %s (%d)\n", topic_list[topic_selected].name, topic_list[topic_selected].id);
-
-
-        } else if (!strcmp(command, "topic_propose") || !strcmp(command, "tp")) {
+        }
+        else if (!strcmp(command, "topic_propose") || !strcmp(command, "tp"))
+        {
             sscanf(inputptr, "%s", argbuffer);
 
-            sprintf(message, "PTP %d %s\n\0", userid, argbuffer);
+            sprintf(message, "PTP %d %s\n", userid, argbuffer);
 
-            if ((n = sendudp(udpfd, &resudp, message, response)) == -1) exit(1);
+            if ((n = sendudp(udpfd, &resudp, message, response)) == -1)
+                exit(1);
             response[n] = '\0';
 
             if (!strcmp(response, "PTR NOK\n"))
@@ -175,33 +203,40 @@ int main(int argc, char** argv) {
                 printf("Failed to propose topic - topic already exists\n");
             else if (!strcmp(response, "PTR FUL\n"))
                 printf("Failed to propose topic - topic list full\n");
-            else {
+            else
+            {
                 printf("Topic proposed successfully\n");
                 topic_amount++;
                 strcpy(topic_list[topic_amount].name, argbuffer);
                 topic_list[topic_amount].id = userid;
                 topic_selected = topic_amount;
             }
-
-        } else if (!strcmp(command, "question_list") || !strcmp(command, "ql")) {
-            if (topic_selected == -1) {
+        }
+        else if (!strcmp(command, "question_list") || !strcmp(command, "ql"))
+        {
+            if (topic_selected == -1)
+            {
                 printf("No topic selected\n");
                 continue;
             }
 
             //TODO: NOT YET IMPLEMENTED
             printf("[LIST OF QUESTIONS OF TOPIC %d]\n", topic_selected);
-
-        } else if (!strcmp(command, "question_get") || !strcmp(command, "qg")) {
+        }
+        else if (!strcmp(command, "question_get") || !strcmp(command, "qg"))
+        {
             //TODO: NOT YET IMPLEMENTED
-
-        } else if (!strcmp(command, "question_submit") || !strcmp(command, "qs")) {
+        }
+        else if (!strcmp(command, "question_submit") || !strcmp(command, "qs"))
+        {
             //TODO: NOT YET IMPLEMENTED
-
-        } else if (!strcmp(command, "answer_submit") || !strcmp(command, "as")) {
+        }
+        else if (!strcmp(command, "answer_submit") || !strcmp(command, "as"))
+        {
             //TODO: NOT YET IMPLEMENTED
-
-        } else printf("Invalid command\n");
+        }
+        else
+            printf("Invalid command\n");
 
         memset(argbuffer, 0, sizeof buffer);
         memset(input, 0, sizeof buffer);
