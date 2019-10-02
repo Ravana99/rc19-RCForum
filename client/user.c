@@ -22,7 +22,7 @@ int sendudp(int udpfd, struct addrinfo** resudp, char* message, char* response) 
     struct sockaddr_in addr;
     socklen_t addrlen;
 
-    if (sendto(udpfd, message, strlen(message) + 1, 0, (*resudp)->ai_addr, (*resudp)->ai_addrlen) == -1) return -1;
+    if (sendto(udpfd, message, strlen(message), 0, (*resudp)->ai_addr, (*resudp)->ai_addrlen) == -1) return -1;
     addrlen = sizeof(addr);
     return recvfrom(udpfd, response, 2048, 0, (struct sockaddr*)&addr, &addrlen);
 }
@@ -106,9 +106,7 @@ int main(int argc, char** argv) {
                 printf("Invalid arguments\n");
                 continue;
             }
-            strcpy(message, "REG ");
-            strcat(message, argbuffer);
-            strcat(message, "\n");
+            sprintf(message, "REG %s\n\0", argbuffer);
 
             if ((n = sendudp(udpfd, &resudp, message, response)) == -1) exit(1);
             response[n] = '\0'; // Appends a '\0' to the response so it can be used in strcmp
@@ -130,7 +128,7 @@ int main(int argc, char** argv) {
         } else if (!strcmp(command, "topic_list") || !strcmp(command, "tl")) {
             char delim[3] = ": ";
             int n;
-            strcpy(message, "LTP\n");
+            strcpy(message, "LTP\n\0");
 
             if ((n = sendudp(udpfd, &resudp, message, response)) == -1) exit(1);
             response[n] = '\0';
@@ -166,7 +164,7 @@ int main(int argc, char** argv) {
         } else if (!strcmp(command, "topic_propose") || !strcmp(command, "tp")) {
             sscanf(inputptr, "%s", argbuffer);
 
-            sprintf(message, "PTP %d %s\n", userid, argbuffer);
+            sprintf(message, "PTP %d %s\n\0", userid, argbuffer);
 
             if ((n = sendudp(udpfd, &resudp, message, response)) == -1) exit(1);
             response[n] = '\0';

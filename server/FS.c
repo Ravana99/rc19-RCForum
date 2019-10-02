@@ -38,11 +38,11 @@ int receiveudp(int udpfd, char* buffer, struct sockaddr_in* cliaddr, socklen_t* 
         sscanf(buffer, "REG %d", &id);
         printf("User %d (IP %s) trying to register... ", id, inet_ntoa(cliaddr->sin_addr));
         if (id > 9999 && id < 100000) {
-            strcpy(response, "RGR OK\n");
+            strcpy(response, "RGR OK\n\0");
             printf("success\n");
         }
         else {
-            strcpy(response, "RGR NOK\n");
+            strcpy(response, "RGR NOK\n\0");
             printf("denied\n");
         }
 
@@ -50,14 +50,11 @@ int receiveudp(int udpfd, char* buffer, struct sockaddr_in* cliaddr, socklen_t* 
 
         DIR *dir;
 	    struct dirent *entry;
-        char topic_count[16], topic_buffer[128], topic_name[16], topic_id[16];
+        char topic_buffer[128], topic_name[16], topic_id[16];
         char delim[2] = "_";
 
         printf("User is listing the available topics\n");
-        strcpy(response, "LTR ");
-
-        sprintf(topic_count, "%d", topic_amount);
-        strcat(response, topic_count);
+        sprintf(response, "LTR %d", topic_amount);
 
         if ((dir = opendir("server/topics")) == NULL) return -1;
         readdir(dir); // Skips directory .
@@ -69,7 +66,7 @@ int receiveudp(int udpfd, char* buffer, struct sockaddr_in* cliaddr, socklen_t* 
             sprintf(topic_buffer, " %s:%s", topic_name, topic_id);
             strcat(response, topic_buffer);
         }
-        strcat(response, "\n");
+        strcat(response, "\n\0");
 
 		closedir(dir);
 
@@ -86,7 +83,7 @@ int receiveudp(int udpfd, char* buffer, struct sockaddr_in* cliaddr, socklen_t* 
 
         if (strlen(topic_name) > 10 || !isAlphanumeric(topic_name)) {
             printf("invalid\n");
-            strcpy(response, "PTR NOK\n");
+            strcpy(response, "PTR NOK\n\0");
         } else {
 
             if ((dir = opendir("server/topics")) == NULL) return -1;
@@ -102,10 +99,10 @@ int receiveudp(int udpfd, char* buffer, struct sockaddr_in* cliaddr, socklen_t* 
             }
             if (topic_amount >= 99) {
                 printf("full\n");
-                strcpy(response, "PTR FUL\n");
+                strcpy(response, "PTR FUL\n\0");
             } else if (duplicate_topic) {
                 printf("duplicate\n");
-                strcpy(response, "PTR DUP\n");
+                strcpy(response, "PTR DUP\n\0");
             } else {
                 printf("success\n");
                 topic_amount++;
@@ -113,7 +110,7 @@ int receiveudp(int udpfd, char* buffer, struct sockaddr_in* cliaddr, socklen_t* 
                 else sprintf(pathname, "server/topics/%d_%s_%d", topic_amount, topic_name, id);
                 printf("%s\n", pathname);
                 if (mkdir(pathname, 0666) == -1) return -1; // Enables R/W for all users
-                strcpy(response, "PTR OK\n");
+                strcpy(response, "PTR OK\n\0");
             }
             closedir(dir);
         }
@@ -121,10 +118,10 @@ int receiveudp(int udpfd, char* buffer, struct sockaddr_in* cliaddr, socklen_t* 
     } else if (!strcmp(request, "LQU")) {
 
     } else {
-        strcpy(response, "ERR\n");
+        strcpy(response, "ERR\n\0");
     }
 
-    return sendto(udpfd, response, strlen(response) + 1, 0, (struct sockaddr*)cliaddr, *len);
+    return sendto(udpfd, response, strlen(response), 0, (struct sockaddr*)cliaddr, *len);
 }
 
 int main(int argc, char** argv) {
