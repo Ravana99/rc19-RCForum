@@ -149,8 +149,10 @@ int main(int argc, char **argv)
         }
         else if (!strcmp(command, "topic_list") || !strcmp(command, "tl"))
         {
+            char old_topic[16];
             char delim[3] = ": ";
             int n;
+            strcpy(old_topic, topic_list[topic_selected].name);
             strcpy(message, "LTP\n");
             if ((n = sendudp(udpfd, &resudp, message, response)) == -1)
                 exit(1);
@@ -163,6 +165,8 @@ int main(int argc, char **argv)
             {
                 strcpy(topic_list[i].name, strtok(NULL, delim));
                 topic_list[i].id = atoi(strtok(NULL, delim));
+                if (!strcmp(old_topic, topic_list[i].name))
+                    topic_selected = i;
             }
             printf("Available topics:\n");
             for (int i = 1; i <= n; i++)
@@ -185,7 +189,7 @@ int main(int argc, char **argv)
                 topic_selected = old;
             }
             else
-                printf("Selected topic: %s (%d)\n", topic_list[topic_selected].name, topic_list[topic_selected].id);
+                printf("Selected topic: %s (proposed by %d)\n", topic_list[topic_selected].name, topic_list[topic_selected].id);
         }
         else if (!strcmp(command, "topic_propose") || !strcmp(command, "tp"))
         {
