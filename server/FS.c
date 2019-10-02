@@ -140,6 +140,62 @@ int receiveudp(int udpfd, char *buffer, struct sockaddr_in *cliaddr, socklen_t *
     }
     else if (!strcmp(request, "LQU"))
     {
+        FILE *file;
+        DIR *dir;
+        struct dirent *entry;
+        char topic_buffer[128], topic_cmp[16], question_folder[32], topic_name[16], pathname[512], answer_path[512], question_name[16], question_id[16];
+        char delim[2] = "_";
+        int question_amount = 0, answer_amount = 0;
+
+        sscanf(buffer, "LQU %s", topic_name);
+
+        printf("User is listing the available questions for the topic %s\n", topic_name);
+        if ((dir = opendir("server/topics")) == NULL)
+            return -1;
+        readdir(dir); // Skips directory .
+        readdir(dir); // Skips directory ..
+        while ((entry = readdir(dir)) != NULL)
+        {
+            strcpy(question_folder, entry->d_name);
+            strtok(entry->d_name, delim);
+            strcpy(topic_cmp, strtok(NULL, delim));
+            if (!strcmp(topic_cmp, topic_name))
+            {
+                sprintf(pathname, "server/topics/%s", question_folder);
+                break;
+            }
+        }
+        closedir(dir);
+
+        if ((dir = opendir(pathname)) == NULL)
+            return -1;
+        readdir(dir); // Skips directory .
+        readdir(dir); // Skips directory ..
+        while ((entry = readdir(dir)) != NULL)
+            question_amount++;
+        closedir(dir);
+        sprintf(response, "LQR %d", question_amount);
+
+        if ((dir = opendir(pathname)) == NULL)
+            return -1;
+        readdir(dir); // Skips directory .
+        readdir(dir); // Skips directory ..
+        while ((entry = readdir(dir)) != NULL)
+        {
+            sprintf(answer_path, "%s/%s/anscount.txt", pathname, entry->d_name);
+            if ((file = fopen(answer_path, "r")) == NULL)
+                exit(1);
+            fscanf(file, "%d", &answer_amount);
+
+            strtok(entry->d_name, delim);
+            strcpy(question_name, strtok(NULL, delim));
+            strcpy(question_id, strtok(NULL, delim));
+            sprintf(topic_buffer, " %s:%s:%d", question_name, question_id, answer_amount);
+            strcat(response, topic_buffer);
+        }
+        strcat(response, "\n");
+
+        closedir(dir);
     }
     else
     {

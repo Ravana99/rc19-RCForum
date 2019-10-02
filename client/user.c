@@ -218,14 +218,34 @@ int main(int argc, char **argv)
         }
         else if (!strcmp(command, "question_list") || !strcmp(command, "ql"))
         {
-            if (topic_selected == -1)
+            int n, question_amount, question_id, question_na;
+            char question_name[16];
+            char delim[3] = ": ";
+
+            if (topic_selected <= 0)
             {
                 printf("No topic selected\n");
                 continue;
             }
 
-            //TODO: NOT YET IMPLEMENTED
-            printf("[LIST OF QUESTIONS OF TOPIC %d]\n", topic_selected);
+            sprintf(message, "LQU %s\n", topic_list[topic_selected].name);
+            if ((n = sendudp(udpfd, &resudp, message, response)) == -1)
+                exit(1);
+            response[n] = '\0';
+
+            strtok(response, delim);
+            question_amount = atoi(strtok(NULL, delim));
+
+            printf("%d questions available for topic %s:\n", question_amount, topic_list[topic_selected].name);
+            for (int i = 1; i <= question_amount; i++)
+            {
+                strcpy(question_name, strtok(NULL, delim));
+                question_id = atoi(strtok(NULL, delim));
+                question_na = atoi(strtok(NULL, delim));
+                printf("%d - %s (proposed by %d) - %d answers\n", i, question_name, question_id, question_na);
+            }
+                
+
         }
         else if (!strcmp(command, "question_get") || !strcmp(command, "qg"))
         {
