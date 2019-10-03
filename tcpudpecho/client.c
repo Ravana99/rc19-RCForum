@@ -13,7 +13,8 @@
 
 #define PORT "58001"
 
-int main() {
+int main()
+{
     struct addrinfo hintstcp, hintsudp, *restcp, *resudp;
     ssize_t n, nbytes, nleft, nwritten, nread;
     int tcpfd, udpfd, errcode;
@@ -36,39 +37,50 @@ int main() {
 
     memset(&act, 0, sizeof act);
     act.sa_handler = SIG_IGN;
-    if (sigaction(SIGPIPE, &act, NULL) == -1) exit(1);
-    
-    if (gethostname(hostname, 128) == -1) exit(1);
+    if (sigaction(SIGPIPE, &act, NULL) == -1)
+        exit(1);
 
-    if ((errcode = getaddrinfo(hostname, PORT, &hintstcp, &restcp)) != 0) exit(1);
-    if ((errcode = getaddrinfo(hostname, PORT, &hintsudp, &resudp)) != 0) exit(1);
+    if (gethostname(hostname, 128) == -1)
+        exit(1);
+
+    if ((errcode = getaddrinfo(hostname, PORT, &hintstcp, &restcp)) != 0)
+        exit(1);
+    if ((errcode = getaddrinfo(hostname, PORT, &hintsudp, &resudp)) != 0)
+        exit(1);
 
     // TCP sending
 
-    if ((tcpfd = socket(restcp->ai_family, restcp->ai_socktype, restcp->ai_protocol)) == -1) exit(1);
+    if ((tcpfd = socket(restcp->ai_family, restcp->ai_socktype, restcp->ai_protocol)) == -1)
+        exit(1);
 
-    if ((errcode = connect(tcpfd, restcp->ai_addr, restcp->ai_addrlen)) == -1) exit(1);
+    if ((errcode = connect(tcpfd, restcp->ai_addr, restcp->ai_addrlen)) == -1)
+        exit(1);
 
     ptr = strcpy(buffer, "Hello!\n");
     nbytes = 7;
 
     nleft = nbytes;
-    while (nleft > 0) {
-        if ((nwritten = write(tcpfd, ptr, nleft)) <= 0) exit(1);
+    while (nleft > 0)
+    {
+        if ((nwritten = write(tcpfd, ptr, nleft)) <= 0)
+            exit(1);
         nleft -= nwritten;
         ptr += nwritten;
     }
 
     ptr = received;
     nleft = nbytes;
-    while (nleft > 0) {
-        if ((nread = read(tcpfd, ptr, nleft)) == -1) exit(1);
-        else if (nread == 0) break;
+    while (nleft > 0)
+    {
+        if ((nread = read(tcpfd, ptr, nleft)) == -1)
+            exit(1);
+        else if (nread == 0)
+            break;
         nleft -= nread;
         ptr += nread;
     }
 
-    nread = nbytes-nleft;
+    nread = nbytes - nleft;
     write(1, "echo from tcp: ", 15);
     write(1, received, nread);
 
@@ -78,12 +90,19 @@ int main() {
 
     // UDP sending
 
-    if ((udpfd = socket(resudp->ai_family, resudp->ai_socktype, resudp->ai_protocol)) == -1) exit(1);
+    if ((udpfd = socket(resudp->ai_family, resudp->ai_socktype, resudp->ai_protocol)) == -1)
+        exit(1);
 
-    if ((n = sendto(udpfd, "Hi!\n", 4, 0, resudp->ai_addr, resudp->ai_addrlen)) == -1) exit(1);
+    if ((n = sendto(udpfd, "Hi!\n", 4, 0, resudp->ai_addr, resudp->ai_addrlen)) == -1)
+        exit(1);
 
     addrlen = sizeof(addr);
-    if ((n = recvfrom(udpfd, buffer, 128, 0, (struct sockaddr*)&addr, &addrlen)) == -1) { write(1, "recvfrom: ", 10); write(1, strerror(errno), strlen(strerror(errno))); exit(1); }
+    if ((n = recvfrom(udpfd, buffer, 128, 0, (struct sockaddr *)&addr, &addrlen)) == -1)
+    {
+        write(1, "recvfrom: ", 10);
+        write(1, strerror(errno), strlen(strerror(errno)));
+        exit(1);
+    }
 
     write(1, "echo from udp: ", 15);
     write(1, buffer, n);
