@@ -133,7 +133,6 @@ void topicSelect(char *inputptr, int topic_number, int number_of_topics, Topic *
     else
     {
         char topic_name[128];
-
         sscanf(inputptr, "%s", topic_name);
         topic_number = 0;
         for (int i = 1; i <= number_of_topics; i++)
