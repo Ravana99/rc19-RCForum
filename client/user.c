@@ -34,7 +34,8 @@ int main(int argc, char **argv)
 {
     struct addrinfo hintstcp, hintsudp, *restcp, *resudp;
     ssize_t n, nbytes, nleft, nwritten, nread;
-    int tcpfd, udpfd, errcode, userid = -1, topic_selected = -1, topic_amount = 0;
+    
+    int tcpfd, udpfd, errcode, userid = -1, topic_number = 0,topic_amount = 0;
     struct sigaction act;
 
     char port[16], hostname[128], buffer[128], received[128], command[128], argbuffer[128], input[2048], message[2048], response[2048];
@@ -125,10 +126,7 @@ int main(int argc, char **argv)
         {
             sscanf(inputptr, "%s", argbuffer);
             userid = atoi(argbuffer);
-            /*if ((userid = atoi(argbuffer)) == 0) {
-                printf("Invalid arguments\n");
-                continue;
-            }*/
+
             sprintf(message, "REG %s\n", argbuffer);
             if ((n = sendudp(udpfd, &resudp, message, response)) == -1)
                 exit(1);
@@ -142,22 +140,17 @@ int main(int argc, char **argv)
                 userid = -1;
             }
         }
-        else if (userid <= 0)
-        {
-            printf("User not registered\n");
-            continue;
-        }
         else if (!strcmp(command, "topic_list") || !strcmp(command, "tl"))
         {
             char old_topic[16];
             char delim[3] = ": ";
             int n;
-            strcpy(old_topic, topic_list[topic_selected].name);
+            strcpy(old_topic, topic_list[topic_number].name);
             strcpy(message, "LTP\n");
             if ((n = sendudp(udpfd, &resudp, message, response)) == -1)
                 exit(1);
             response[n] = '\0';
-
+            printf("%s\n",strtok(response, delim); );
             strtok(response, delim);
             n = atoi(strtok(NULL, delim));
             topic_amount = n;
@@ -166,32 +159,41 @@ int main(int argc, char **argv)
                 strcpy(topic_list[i].name, strtok(NULL, delim));
                 topic_list[i].id = atoi(strtok(NULL, delim));
                 if (!strcmp(old_topic, topic_list[i].name))
-                    topic_selected = i;
+                    topic_number = i;
             }
             printf("Available topics:\n");
             for (int i = 1; i <= n; i++)
                 printf("%d - %s (proposed by %d)\n", i, topic_list[i].name, topic_list[i].id);
         }
-        else if (!strcmp(command, "topic_select") || !strcmp(command, "ts"))
+        else if (!strcmp(command, "topic_select"))
         {
-            int old = topic_selected;
             sscanf(inputptr, "%s", argbuffer);
-            if ((topic_selected = atoi(argbuffer)) == 0)
-            {
-                printf("Invalid arguments\n");
-                topic_selected = old;
-                continue;
-            }
+            topic_number=0;
+           	for (int i=1; i<=topic_amount;i++){
+           		if (!strcmp(argbuffer, topic_list[i].name)){
+           			printf("Selected topic: %s (proposed by %d)\n", topic_list[i].name, topic_list[i].id);
+           			topic_number=i;
+           			break;
+           		}
+           	}
+           	if(!topic_number){
+           		 printf("Invalid topic\n");
+           	}
 
-            if (topic_selected <= 0 || topic_selected > topic_amount)
+        }
+        else if (!strcmp(command, "ts")){
+            sscanf(inputptr, "%s", argbuffer);
+            topic_number = atoi(argbuffer);
+
+            if (topic_number<=0 || topic_number > topic_amount)
             {
                 printf("Invalid topic number\n");
-                topic_selected = old;
+                topic_number=0;
             }
             else
-                printf("Selected topic: %s (proposed by %d)\n", topic_list[topic_selected].name, topic_list[topic_selected].id);
+                printf("Selected topic: %s (proposed by %d)\n", topic_list[topic_number].name, topic_list[topic_number].id);
         }
-        else if (!strcmp(command, "topic_propose") || !strcmp(command, "tp"))
+        else if (userid !=-1 && (!strcmp(command, "topic_propose") || !strcmp(command, "tp")))
         {
             sscanf(inputptr, "%s", argbuffer);
 
@@ -213,7 +215,7 @@ int main(int argc, char **argv)
                 topic_amount++;
                 strcpy(topic_list[topic_amount].name, argbuffer);
                 topic_list[topic_amount].id = userid;
-                topic_selected = topic_amount;
+                topic_number = topic_amount;
             }
         }
         else if (!strcmp(command, "question_list") || !strcmp(command, "ql"))
@@ -222,13 +224,13 @@ int main(int argc, char **argv)
             char question_name[16];
             char delim[3] = ": ";
 
-            if (topic_selected <= 0)
+            if (!topic_number)
             {
                 printf("No topic selected\n");
                 continue;
             }
 
-            sprintf(message, "LQU %s\n", topic_list[topic_selected].name);
+            sprintf(message, "LQU %s\n", topic_list[topic_number].name);
             if ((n = sendudp(udpfd, &resudp, message, response)) == -1)
                 exit(1);
             response[n] = '\0';
@@ -236,7 +238,7 @@ int main(int argc, char **argv)
             strtok(response, delim);
             question_amount = atoi(strtok(NULL, delim));
 
-            printf("%d questions available for topic %s:\n", question_amount, topic_list[topic_selected].name);
+            printf("%d questions available for topic %s:\n", question_amount, topic_list[topic_number].name);
             for (int i = 1; i <= question_amount; i++)
             {
                 strcpy(question_name, strtok(NULL, delim));
@@ -259,9 +261,10 @@ int main(int argc, char **argv)
         {
             //TODO: NOT YET IMPLEMENTED
         }
-        else
-            printf("Invalid command\n");
-
+        else {
+            printf("Unknown command\n");
+            continue;
+        }
         memset(argbuffer, 0, sizeof buffer);
         memset(input, 0, sizeof buffer);
         memset(command, 0, sizeof buffer);
