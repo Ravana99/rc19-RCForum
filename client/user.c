@@ -57,7 +57,6 @@ int sendUDP(int udpfd, struct addrinfo **resudp, char *message, char *response)
     struct sockaddr_in addr;
     socklen_t addrlen;
     ssize_t n;
-
     if (sendto(udpfd, message, strlen(message), 0, (*resudp)->ai_addr, (*resudp)->ai_addrlen) == -1)
         return -1;
     addrlen = sizeof(addr);
@@ -74,45 +73,46 @@ int sendUDP(int udpfd, struct addrinfo **resudp, char *message, char *response)
 //COMMANDS///
 /////////////
 
-void registerUser(int userid, char *inputptr, char *message, char *response, int udpfd, struct addrinfo *resudp)
+void registerUser(int *userid, char *inputptr, char *message, char *response, int udpfd, struct addrinfo *resudp)
 {
-    char buffer[5];
-    sscanf(inputptr, "%s", buffer);
-    sprintf(message, "REG %s\n", buffer);
+    char *newID = malloc(sizeof(char) * 5);
+    sscanf(inputptr, "%s", newID);
+    sprintf(message, "REG %s\n", newID);
     sendUDP(udpfd, &resudp, message, response);
 
     if (!strcmp(response, "RGR OK\n"))
-        printf("User \"%d\" registered\n", userid);
+    {
+        *userid = atoi(newID);
+        printf("User \"%d\" registered\n", *userid);
+    }
     else
     {
         printf("Registration failed\n");
-        userid = 0;
     }
+    free(newID);
 }
-void topicList(char *message, char *response, int udpfd, struct addrinfo *resudp, int topic_number, int number_of_topics, Topic *topic_list)
+void topicList(char *message, char *response, int udpfd, struct addrinfo *resudp, int *topic_number, int *number_of_topics, Topic *topic_list)
 {
     char old_topic[16];
     char delim[3] = ": ";
     int n;
 
-    strcpy(old_topic, topic_list[topic_number].name);
+    strcpy(old_topic, topic_list[*topic_number].name);
     strcpy(message, "LTP\n");
     sendUDP(udpfd, &resudp, message, response);
-    printf("%s\n", strtok(response, delim));
     strtok(response, delim);
-    printf("");
     n = atoi(strtok(NULL, delim));
-    number_of_topics = n;
+    *number_of_topics = n;
     for (int i = 1; i <= n; i++)
     {
         strcpy(topic_list[i].name, strtok(NULL, delim));
         topic_list[i].id = atoi(strtok(NULL, delim));
         if (!strcmp(old_topic, topic_list[i].name))
-            topic_number = i;
+            *topic_number = i;
     }
     printf("Available topics:\n");
     for (int i = 1; i <= n; i++)
-        printf("%d - %s (proposed by %d)\n", i, topic_list[i].name, topic_list[i].id);
+        printf("Topic %d - %s (proposed by %d)\n", i, topic_list[i].name, topic_list[i].id);
 }
 void topicSelect(char *inputptr, int topic_number, int number_of_topics, Topic *topic_list, bool selectByNumber)
 {
@@ -121,7 +121,7 @@ void topicSelect(char *inputptr, int topic_number, int number_of_topics, Topic *
         char buffer[5];
         sscanf(inputptr, "%s", buffer);
         topic_number = atoi(buffer);
-
+        printf("%d\n", number_of_topics);
         if (topic_number <= 0 || topic_number > number_of_topics)
         {
             printf("Invalid topic number\n");
@@ -278,10 +278,10 @@ int main(int argc, char **argv)
         if (!strcmp(command, "exit"))
             quit(restcp, resudp, udpfd);
         else if (!strcmp(command, "register") || !strcmp(command, "reg"))
-            registerUser(userid, inputptr, message, response, udpfd, resudp);
+            registerUser(&userid, inputptr, message, response, udpfd, resudp);
 
         else if (!strcmp(command, "topic_list") || !strcmp(command, "tl"))
-            topicList(message, response, udpfd, resudp, topic_number, number_of_topics, topic_list);
+            topicList(message, response, udpfd, resudp, &topic_number, &number_of_topics, topic_list);
 
         else if (!strcmp(command, "topic_select"))
             topicSelect(inputptr, topic_number, number_of_topics, topic_list, false);
