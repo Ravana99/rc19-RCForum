@@ -1,5 +1,7 @@
 /* Group 39 - Joao Fonseca 89476, Tiago Pires 89544, Tomas Lopes 89552 */
 
+//send only topic instead of sending topic number and topic list?
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
@@ -13,11 +15,17 @@
 #include <sys/time.h>
 #include <unistd.h>
 #include <stdbool.h>
-
+#include <limits.h>
+struct answer
+{
+    char name[16];
+} typedef Answer;
 struct topic
 {
     char name[16];
     int id;
+    Answer answers[99];
+    //guardar as respostas aqui ou fzr pedido udp?
 } typedef Topic;
 
 void setHostNameAndPort(int argc, char **argv, char *hostname, char *port)
@@ -62,9 +70,22 @@ int sendUDP(int udpfd, struct addrinfo **resudp, char *message, char *response)
     addrlen = sizeof(addr);
     n = recvfrom(udpfd, response, 2048, 0, (struct sockaddr *)&addr, &addrlen);
     if (n == -1)
-    {
         exit(EXIT_FAILURE);
-    };
+    response[n] = '\0'; // Appends a '\0' to the response so it can be used in strcmp
+    return n;
+}
+
+int sendTCP(int tcpfd, struct addrinfo **restcp, char *message, char *response)
+{
+    struct sockaddr_in addr;
+    socklen_t addrlen;
+    ssize_t n;
+    if (sendto(tcpfd, message, strlen(message), 0, (*restcp)->ai_addr, (*restcp)->ai_addrlen) == -1)
+        return -1;
+    addrlen = sizeof(addr);
+    n = recvfrom(tcpfd, response, 2048, 0, (struct sockaddr *)&addr, &addrlen);
+    if (n == -1)
+        exit(EXIT_FAILURE);
     response[n] = '\0'; // Appends a '\0' to the response so it can be used in strcmp
     return n;
 }
@@ -75,7 +96,7 @@ int sendUDP(int udpfd, struct addrinfo **resudp, char *message, char *response)
 
 void registerUser(int *userid, char *inputptr, char *message, char *response, int udpfd, struct addrinfo *resudp)
 {
-    char *newID = malloc(sizeof(char) * 5);
+    char newID[5];
     sscanf(inputptr, "%s", newID);
     sprintf(message, "REG %s\n", newID);
     sendUDP(udpfd, &resudp, message, response);
@@ -83,77 +104,65 @@ void registerUser(int *userid, char *inputptr, char *message, char *response, in
     if (!strcmp(response, "RGR OK\n"))
     {
         *userid = atoi(newID);
-        printf("User \"%d\" registered\n", *userid);
+        printf("User \"%d\" registered\n\n", *userid);
     }
     else
-    {
-        printf("Registration failed\n");
-    }
-    free(newID);
+        printf("Registration failed\n\n");
 }
-void topicList(char *message, char *response, int udpfd, struct addrinfo *resudp, int *topic_number, int *number_of_topics, Topic *topic_list)
+void topicList(char *message, char *response, int udpfd, struct addrinfo *resudp, int *number_of_topics, Topic *topic_list)
 {
-    char old_topic[16];
     char delim[3] = ": ";
     int n;
 
-    strcpy(old_topic, topic_list[*topic_number].name);
     strcpy(message, "LTP\n");
     sendUDP(udpfd, &resudp, message, response);
     strtok(response, delim);
     n = atoi(strtok(NULL, delim));
     *number_of_topics = n;
+    printf("Available topics:\n");
     for (int i = 1; i <= n; i++)
     {
         strcpy(topic_list[i].name, strtok(NULL, delim));
         topic_list[i].id = atoi(strtok(NULL, delim));
-        if (!strcmp(old_topic, topic_list[i].name))
-            *topic_number = i;
-    }
-    printf("Available topics:\n");
-    for (int i = 1; i <= n; i++)
         printf("Topic %d - %s (proposed by %d)\n", i, topic_list[i].name, topic_list[i].id);
+    }
+    printf("\n");
 }
-void topicSelect(char *inputptr, int topic_number, int number_of_topics, Topic *topic_list, bool selectByNumber)
+void topicSelect(char *inputptr, int *active_topic_number, int number_of_topics, Topic *topic_list, bool selectByNumber, char *buffer)
 {
+    int tmp_topic_number = 0;
     if (selectByNumber)
     {
-        char buffer[5];
-        sscanf(inputptr, "%s", buffer);
-        topic_number = atoi(buffer);
-        printf("%d\n", number_of_topics);
-        if (topic_number <= 0 || topic_number > number_of_topics)
-        {
-            printf("Invalid topic number\n");
-            topic_number = 0;
-        }
+        char small_buffer[5];
+
+        sscanf(inputptr, "%s", small_buffer);
+        tmp_topic_number = atoi(small_buffer);
+
+        if (tmp_topic_number <= 0 || tmp_topic_number > number_of_topics)
+            printf("Invalid topic number\n\n");
         else
-            printf("Selected topic: %s (proposed by %d)\n", topic_list[topic_number].name, topic_list[topic_number].id);
+        {
+            *active_topic_number = tmp_topic_number;
+            printf("Selected topic: %s (proposed by %d)\n\n", topic_list[*active_topic_number].name, topic_list[*active_topic_number].id);
+        }
     }
     else
     {
-        char topic_name[128];
-        sscanf(inputptr, "%s", topic_name);
-        topic_number = 0;
+        sscanf(inputptr, "%s", buffer);
         for (int i = 1; i <= number_of_topics; i++)
-        {
-            if (!strcmp(topic_name, topic_list[i].name))
+            if (!strcmp(buffer, topic_list[i].name))
             {
-                printf("Selected topic: %s (proposed by %d)\n", topic_list[i].name, topic_list[i].id);
-                topic_number = i;
+                printf("Selected topic: %s (proposed by %d)\n\n", topic_list[i].name, topic_list[i].id);
+                *active_topic_number = tmp_topic_number = i;
                 break;
             }
-        }
-        if (!topic_number)
-        {
-            printf("Invalid topic\n");
-        }
+        if (!tmp_topic_number)
+            printf("Invalid topic name\n\n");
     }
 }
 void topicPropose(char *inputptr, char *message, char *response, int udpfd, struct addrinfo *resudp,
-                  int userid, int topic_number, int number_of_topics, Topic *topic_list)
+                  int userid, int *active_topic_number, int *number_of_topics, Topic *topic_list, char *buffer)
 {
-    char buffer[128];
     sscanf(inputptr, "%s", buffer);
 
     sprintf(message, "PTP %d %s\n", userid, buffer);
@@ -169,33 +178,31 @@ void topicPropose(char *inputptr, char *message, char *response, int udpfd, stru
     else
     {
         printf("Topic proposed successfully\n");
-        number_of_topics++;
-        strcpy(topic_list[number_of_topics].name, buffer);
-        topic_list[number_of_topics].id = userid;
-        topic_number = number_of_topics;
+        (*number_of_topics)++;
+        strcpy(topic_list[*number_of_topics].name, buffer);
+        topic_list[*number_of_topics].id = userid;
+        *active_topic_number = *number_of_topics;
     }
 }
 void questionList(char *message, char *response, int udpfd, struct addrinfo *resudp,
-                  int topic_number, int number_of_topics, Topic *topic_list)
+                  int active_topic_number, int number_of_topics, Topic *topic_list)
 {
-    int question_amount, question_id, question_na;
+    int number_of_questions, question_id, question_na;
     char question_name[16];
     char delim[3] = ": ";
 
-    if (!topic_number)
-    {
+    if (!active_topic_number)
         printf("No topic selected\n");
-    }
     else
     {
-        sprintf(message, "LQU %s\n", topic_list[topic_number].name);
+        sprintf(message, "LQU %s\n", topic_list[active_topic_number].name);
         sendUDP(udpfd, &resudp, message, response);
 
         strtok(response, delim);
-        question_amount = atoi(strtok(NULL, delim));
+        number_of_questions = atoi(strtok(NULL, delim));
 
-        printf("%d questions available for topic %s:\n", question_amount, topic_list[topic_number].name);
-        for (int i = 1; i <= question_amount; i++)
+        printf("%d questions available for topic %s:\n", number_of_questions, topic_list[active_topic_number].name);
+        for (int i = 1; i <= number_of_questions; i++)
         {
             strcpy(question_name, strtok(NULL, delim));
             question_id = atoi(strtok(NULL, delim));
@@ -204,11 +211,65 @@ void questionList(char *message, char *response, int udpfd, struct addrinfo *res
         }
     }
 }
-void questionGet()
+void questionGet(char *message, char *response, int tcpfd, struct addrinfo *restcp, int active_topic_number, Topic *topic_list, bool selectByNumber)
 {
+    /*if (selectByNumber)
+    { 
+        char small_buffer[5];
+        sscanf(inputptr, "%s", small_buffer);
+        tmp_topic_number = atoi(small_buffer);
+
+        if (tmp_topic_number <= 0 || tmp_topic_number > number_of_topics)
+            printf("Invalid topic number\n\n");
+        else
+        {
+            *active_topic_number = tmp_topic_number;
+            printf("Selected topic: %s (proposed by %d)\n\n", topic_list[*active_topic_number].name, topic_list[*active_topic_number].id);
+        }
+    }
+    else
+    {
+        sscanf(inputptr, "%s", buffer);
+        for (int i = 1; i <= number_of_topics; i++)
+            if (!strcmp(buffer, topic_list[i].name))
+            {
+                printf("Selected topic: %s (proposed by %d)\n\n", topic_list[i].name, topic_list[i].id);
+                *active_topic_number = tmp_topic_number = i;
+                break;
+            }
+        if (!tmp_topic_number)
+            printf("Invalid topic name\n\n");
+    }*/
 }
-void questionSubmit()
+void questionSubmit(char *inputptr, char *message, char *response, int tcpfd, struct addrinfo *restcp, int userid, int active_topic_number, Topic *topic_list)
 {
+    //filename number of chars??
+    //o ponto faz parte do nome ou da extensao?
+
+    char question[11], filename[NAME_MAX + 3], imagefilename[NAME_MAX + 3];
+    sscanf(inputptr, "%s %s %s", question, filename, imagefilename);
+
+    strcpy(message, "QUS ");
+    strcat(message, userid);
+    strcat(message, " ");
+    strcat(message, topic_list[active_topic_number].name);
+    strcat(message, " ");
+    strcat(message, question);
+    strcat(message, " ");
+    strcat(message, qsize);
+    strcat(message, " ");
+    strcat(message, question);
+    strcat(message, " ");
+    nbytes = 7;
+
+    nleft = nbytes;
+    while (nleft > 0)
+    {
+        if ((nwritten = write(fd, ptr, nleft)) <= 0)
+            exit(1);
+        nleft -= nwritten;
+        ptr += nwritten;
+    }
 }
 void answerSubmit()
 {
@@ -220,23 +281,23 @@ void quit(struct addrinfo *restcp, struct addrinfo *resudp, int udpfd)
     close(udpfd);
     exit(EXIT_SUCCESS);
 }
+
 int main(int argc, char **argv)
 {
+    Topic topic_list[99 + 1]; // First entry is left empty to facilitate indexing
     struct addrinfo hintstcp, hintsudp, *restcp, *resudp;
     ssize_t n, nbytes, nleft, nwritten, nread;
 
-    int tcpfd, udpfd, errcode, topic_number = 0, number_of_topics = 0, userid = 0;
+    int tcpfd, udpfd, errcode, active_topic_number = 0, number_of_topics = 0, userid = 0;
     struct sigaction act;
 
-    char port[16], hostname[128], buffer[128], received[128], command[128], input[2048];
+    char port[16], hostname[128], buffer[128], input[128], command[128], message[2048], response[2048], active_question[11];
     char *inputptr, *ptr;
-    char *message = malloc(sizeof(char) * 2048);
-    char *response = malloc(sizeof(char) * 2048);
 
-    Topic topic_list[99 + 1]; // First entry is left empty to facilitate indexing
-    memset(topic_list, 0, sizeof topic_list);
+    //memset(topic_list, 0, sizeof topic_list);
 
-    memset(received, 0, sizeof received);
+    setHostNameAndPort(argc, argv, hostname, port);
+
     memset(&hintstcp, 0, sizeof hintstcp);
     memset(&hintsudp, 0, sizeof hintsudp);
     hintstcp.ai_family = AF_INET;
@@ -253,8 +314,6 @@ int main(int argc, char **argv)
     if (sigaction(SIGPIPE, &act, NULL) == -1)
         exit(EXIT_FAILURE);
 
-    setHostNameAndPort(argc, argv, hostname, port);
-
     if (getaddrinfo(hostname, port, &hintstcp, &restcp) != 0)
         exit(EXIT_FAILURE);
     if (getaddrinfo(hostname, port, &hintsudp, &resudp) != 0)
@@ -267,6 +326,7 @@ int main(int argc, char **argv)
 
     while (1)
     {
+        //printf("Number of topics %d\nActive Topic %s\nUserID %d\n", number_of_topics, topic_list[active_topic_number].name, userid);
         fgets(input, 2048, stdin);
         if (!strcmp(input, "\n"))
             continue;
@@ -280,36 +340,40 @@ int main(int argc, char **argv)
             registerUser(&userid, inputptr, message, response, udpfd, resudp);
 
         else if (!strcmp(command, "topic_list") || !strcmp(command, "tl"))
-            topicList(message, response, udpfd, resudp, &topic_number, &number_of_topics, topic_list);
+            topicList(message, response, udpfd, resudp, &number_of_topics, topic_list);
 
         else if (!strcmp(command, "topic_select"))
-            topicSelect(inputptr, topic_number, number_of_topics, topic_list, false);
-
+            topicSelect(inputptr, &active_topic_number, number_of_topics, topic_list, false, buffer);
         else if (!strcmp(command, "ts"))
-            topicSelect(inputptr, topic_number, number_of_topics, topic_list, true);
+            topicSelect(inputptr, &active_topic_number, number_of_topics, topic_list, true, buffer);
 
         else if (userid != 0 && (!strcmp(command, "topic_propose") || !strcmp(command, "tp")))
             topicPropose(inputptr, message, response, udpfd, resudp,
-                         userid, topic_number, number_of_topics, topic_list);
+                         userid, &active_topic_number, &number_of_topics, topic_list, buffer);
 
-        else if (!strcmp(command, "question_list") || !strcmp(command, "ql"))
+        else if (!strcmp(command, "question_list"))
             questionList(message, response, udpfd, resudp,
-                         topic_number, number_of_topics, topic_list);
+                         active_topic_number, number_of_topics, topic_list);
 
-        else if (!strcmp(command, "question_get") || !strcmp(command, "qg"))
-            continue;
+        else if (!strcmp(command, "question_get"))
+            questionGet(message, response, tcpfd, restcp, active_topic_number, topic_list, false);
+        else if (!strcmp(command, "qg"))
+            questionGet(message, response, tcpfd, restcp, active_topic_number, topic_list, true);
+
         else if (!strcmp(command, "question_submit") || !strcmp(command, "qs"))
-            continue;
+            questionSubmit(inputptr, message, response, tcpfd, restcp, userid, active_topic_number, topic_list);
+
         else if (!strcmp(command, "answer_submit") || !strcmp(command, "as"))
-            continue;
+            answerSubmit();
+
         else
-            printf("Unknown command\n");
+            printf("Unknown command\n\n");
 
         memset(message, 0, sizeof(char) * 2048);
         memset(response, 0, sizeof(char) * 2048);
         memset(buffer, 0, sizeof buffer);
-        memset(input, 0, sizeof buffer);
-        memset(command, 0, sizeof buffer);
+        memset(input, 0, sizeof input);
+        memset(command, 0, sizeof command);
     }
 }
 
