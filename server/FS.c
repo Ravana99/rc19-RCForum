@@ -14,6 +14,7 @@
 #include <sys/time.h>
 #include <dirent.h>
 #include <ctype.h>
+#include <fcntl.h>
 
 #define max(A, B) ((A) >= (B) ? (A) : (B))
 
@@ -131,8 +132,8 @@ int receiveudp(int udpfd, char *buffer, struct sockaddr_in *cliaddr, socklen_t *
                 else
                     sprintf(pathname, "server/topics/%d_%s_%d", topic_amount, topic_name, id);
                 printf("%s\n", pathname);
-                if (mkdir(pathname, 0666) == -1)
-                    return -1; // Enables R/W for all users
+                if (mkdir(pathname, 0666) == -1) // Enables R/W for all users
+                    return -1;
                 strcpy(response, "PTR OK\n");
             }
             closedir(dir);
@@ -143,7 +144,7 @@ int receiveudp(int udpfd, char *buffer, struct sockaddr_in *cliaddr, socklen_t *
         FILE *file;
         DIR *dir;
         struct dirent *entry;
-        char topic_buffer[128], topic_cmp[16], question_folder[32], topic_name[16], pathname[512], answer_path[512], question_name[16], question_id[16];
+        char topic_buffer[128], topic_cmp[16], topic_folder[32], topic_name[16], pathname[512], answer_path[512], question_name[16], question_id[16];
         char delim[2] = "_";
         int question_amount = 0, answer_amount = 0;
 
@@ -156,12 +157,12 @@ int receiveudp(int udpfd, char *buffer, struct sockaddr_in *cliaddr, socklen_t *
         readdir(dir); // Skips directory ..
         while ((entry = readdir(dir)) != NULL)
         {
-            strcpy(question_folder, entry->d_name);
+            strcpy(topic_folder, entry->d_name);
             strtok(entry->d_name, delim);
             strcpy(topic_cmp, strtok(NULL, delim));
             if (!strcmp(topic_cmp, topic_name))
             {
-                sprintf(pathname, "server/topics/%s", question_folder);
+                sprintf(pathname, "server/topics/%s", topic_folder);
                 break;
             }
         }
@@ -203,6 +204,274 @@ int receiveudp(int udpfd, char *buffer, struct sockaddr_in *cliaddr, socklen_t *
     }
 
     return sendto(udpfd, response, strlen(response), 0, (struct sockaddr *)cliaddr, *len);
+}
+
+// NEEDS TESTING
+void write_full(int fd, char *message)
+{
+    int nw;
+    int n = strlen(message);
+    char *messageptr = &message[0];
+    while (n > 0)
+    {
+        if ((nw = write(fd, messageptr, n)) <= 0)
+            exit(1);
+        n -= nw;
+        messageptr += nw;
+    }
+}
+
+int receivetcp(int connfd, char *buffer, struct sockaddr_in *cliaddr, socklen_t *len)
+{
+    char request[128], response[2048];
+    long buffer_size = 2048;
+    int id, n;
+    long realloc_aux;
+    char *bufferptr;
+
+    bufferptr = &buffer[0];
+
+    do
+    {
+        if ((n = read(connfd, bufferptr, 1)) <= 0)
+            exit(1);
+        bufferptr += n;
+    } while (*(bufferptr - n) != ' ');
+
+    sscanf(buffer, "%s ", request);
+
+    if (!strcmp(request, "GQU"))
+    {
+        return 0;
+    }
+    else if (!strcmp(request, "QUS"))
+    {
+
+        int space_count = 0, question_count = 0, duplicate_question = 0;
+        int quserid, n, fd, nw;
+        long qsize;
+        DIR *dir;
+        struct dirent *entry;
+        char delim[2] = "_";
+        char *ptr;
+        char topic[16], cmp[16], question[16], pathname[128], path_aux[128], topic_folder[32];
+
+        do
+        { // Reads until 4th space (between qsize and qdata)
+            if ((n = read(connfd, bufferptr, 1)) <= 0)
+                exit(1);
+            if (*bufferptr == ' ')
+                space_count++;
+            bufferptr += n;
+        } while (space_count < 4);
+
+        // Scans command information
+        sscanf(buffer, "QUS %d %s %s %ld", &quserid, topic, question, &qsize);
+
+        realloc_aux = bufferptr - buffer;
+        if ((buffer = (char *)realloc(buffer, (2048 + qsize) * sizeof(char))) == NULL)
+            return -1;
+        bufferptr = buffer + realloc_aux;
+
+        printf("User %d is trying to submit question %s in topic %s... ", quserid, question, topic);
+
+        // Opens topic folder
+        if ((dir = opendir("server/topics")) == NULL)
+            return -1;
+        readdir(dir); // Skips directory .
+        readdir(dir); // Skips directory ..
+        while ((entry = readdir(dir)) != NULL)
+        {
+            strcpy(topic_folder, entry->d_name);
+            strtok(entry->d_name, delim);
+            strcpy(cmp, strtok(NULL, delim));
+            if (!strcmp(cmp, topic))
+            {
+                sprintf(pathname, "server/topics/%s", topic_folder);
+                break;
+            }
+        }
+        closedir(dir);
+
+        // Counts number of questions in topic and checks for duplicate
+        if ((dir = opendir(pathname)) == NULL)
+            return -1;
+        readdir(dir); // Skips directory .
+        readdir(dir); // Skips directory ..
+        while ((entry = readdir(dir)) != NULL)
+        {
+            question_count++;
+            strtok(entry->d_name, delim);
+            strcpy(cmp, strtok(NULL, delim));
+            if (!strcmp(cmp, question))
+            {
+                duplicate_question = 1;
+                break;
+            }
+        }
+        if (question_count >= 99)
+        {
+            printf("full\n");
+            write_full(connfd, "QUR FUL\n");
+            return 0;
+        }
+        else if (duplicate_question)
+        {
+            printf("duplicate\n");
+            write_full(connfd, "QUR DUP\n");
+            return 0;
+        }
+        closedir(dir);
+
+        // Creates question folder
+        if (question_count < 9)
+            sprintf(pathname, "server/topics/%s/0%d_%s_%d", topic_folder, question_count + 1, question, quserid);
+        else
+            sprintf(pathname, "server/topics/%s/%d_%s_%d", topic_folder, question_count + 1, question, quserid);
+
+        if (mkdir(pathname, 0666) == -1) // Enables R/W for all users
+            return -1;
+
+        // Creates answer count file
+        strcpy(path_aux, pathname);
+        strcat(path_aux, "/anscount.txt");
+        if ((fd = open(path_aux, O_WRONLY | O_CREAT, S_IRUSR)) < 0)
+            return -1;
+        if (write(fd, "0", 1) != 1)
+            return -1;
+        if (close(fd) < 0)
+            return -1;
+
+        // Creates question info file
+        strcpy(path_aux, pathname);
+        strcat(path_aux, "/qinfo.txt");
+        if ((fd = open(path_aux, O_WRONLY | O_CREAT, S_IRUSR)) < 0)
+            return -1;
+        while ((n = read(connfd, bufferptr, qsize)) != 0)
+        {
+            if (n == -1)
+                return -1;
+            ptr = bufferptr;
+            qsize -= n;
+
+            while (n > 0)
+            {
+                if ((nw = write(fd, ptr, n)) <= 0)
+                    return -1;
+                n -= nw;
+                ptr += nw;
+            }
+            bufferptr += n;
+        }
+
+        if (close(fd) < 0)
+            return -1;
+
+        // Reads space between qdata and qIMG
+        if ((n = read(connfd, bufferptr, 1)) <= 0)
+            return -1;
+        bufferptr += n;
+
+        // Reads qIMG
+        if ((n = read(connfd, bufferptr, 1)) <= 0)
+            return -1;
+        bufferptr += n;
+
+        if (*(bufferptr - n) == '1') // Has image to read
+        {
+            char *ptr_aux = bufferptr;
+            char iext[4];
+            long isize;
+            space_count = 0;
+            do // Reads 3 more spaces (until the space between isize and idata)
+            {
+                if ((n = read(connfd, bufferptr, 1)) <= 0)
+                    exit(1);
+                if (*bufferptr == ' ')
+                    space_count++;
+                bufferptr += n;
+            } while (space_count < 3);
+
+            sscanf(ptr_aux, " %s %ld ", iext, &isize);
+
+            realloc_aux = bufferptr - buffer;
+            if ((buffer = (char *)realloc(buffer, (2048 + qsize + isize) * sizeof(char))) == NULL)
+                return -1;
+            bufferptr = buffer + realloc_aux;
+
+            strcpy(path_aux, pathname);
+            strcat(path_aux, "/qimg.");
+            strcat(path_aux, iext);
+
+            if ((fd = open(path_aux, O_WRONLY | O_CREAT, S_IRUSR)) < 0)
+                return -1;
+            while ((n = read(connfd, bufferptr, isize)) != 0)
+            {
+                if (n == -1)
+                    return -1;
+                ptr = bufferptr;
+                isize -= n;
+                while (n > 0)
+                {
+                    if ((nw = write(fd, ptr, n)) <= 0)
+                        return -1;
+                    n -= nw;
+                    ptr += nw;
+                }
+                bufferptr += n;
+            }
+            if (close(fd) < 0)
+                return -1;
+
+            if ((n = read(connfd, bufferptr, 1)) <= 0)
+                return -1;
+            if (*bufferptr == '\n')
+            {
+                printf("success\n");
+                write_full(connfd, "QUR OK\n");
+                return 0;
+            }
+            else
+            {
+                printf("failure\n");
+                write_full(connfd, "QUR NOK\n");
+                return 0;
+            }
+        }
+        else if (*(bufferptr - n) == '0') // Has no image to read
+        {
+            if ((n = read(connfd, bufferptr, 1)) <= 0)
+                return -1;
+            if (*bufferptr == '\n')
+            {
+                printf("success\n");
+                write_full(connfd, "QUR OK\n");
+                return 0;
+            }
+            else
+            {
+                printf("failure\n");
+                write_full(connfd, "QUR NOK\n");
+                return 0;
+            }
+        }
+        else
+        {
+            printf("failure\n");
+            write_full(connfd, "QUR NOK\n");
+            return 0;
+        }
+    }
+    else if (!strcmp(request, "ANS"))
+    {
+        return 0;
+    }
+    else
+    {
+        printf("Unexpected protocol message received\n");
+        write_full(connfd, "ERR\n");
+        return 0;
+    }
 }
 
 int main(int argc, char **argv)
@@ -300,19 +569,35 @@ int main(int argc, char **argv)
 
         if (FD_ISSET(listenfd, &rset))
         {
-            /*
             len = sizeof(cliaddr);
-            do connfd = accept(listenfd, (struct sockaddr*)&cliaddr, &len); while (connfd == -1 && errno == EINTR);
-            if (connfd == -1) exit(1);
-            
-            if ((childpid = fork()) == 0) {
+            do
+                connfd = accept(listenfd, (struct sockaddr *)&cliaddr, &len);
+            while (connfd == -1 && errno == EINTR);
+            if (connfd == -1)
+                exit(1);
+
+            if ((childpid = fork()) == 0)
+            {
+                char *tcpbuffer;
+                if ((tcpbuffer = (char *)malloc(2048 * sizeof(char))) == NULL)
+                    exit(1);
                 close(listenfd);
-                memset(buffer, 0, sizeof buffer);
-                while ((n = read(connfd, buffer, 128)) != 0) {
-                    if (n == -1) exit(1);
+                memset(tcpbuffer, 0, 2048);
+
+                if (receivetcp(connfd, tcpbuffer, &cliaddr, &len) == -1)
+                    exit(1);
+                else
+                    exit(0);
+                /*
+                while ((n = read(connfd, buffer, 128)) != 0)
+                {
+                    if (n == -1)
+                        exit(1);
                     ptr = &buffer[0];
-                    while (n > 0) {
-                        if ((nw = write(connfd, ptr, n)) <= 0) exit(1);
+                    while (n > 0)
+                    {
+                        if ((nw = write(connfd, ptr, n)) <= 0)
+                            exit(1);
                         n -= nw;
                         ptr += nw;
                     }
@@ -321,11 +606,15 @@ int main(int argc, char **argv)
                 write(1, buffer, strlen(buffer));
                 close(connfd);
                 exit(0);
+                */
             }
-            else if (childpid == -1) exit(1);
-            do errcode = close(connfd); while (errcode == -1 && errno == EINTR);
-            if (errcode == -1) exit(1);
-            */
+            else if (childpid == -1)
+                exit(1);
+            do
+                errcode = close(connfd);
+            while (errcode == -1 && errno == EINTR);
+            if (errcode == -1)
+                exit(1);
         }
 
         if (FD_ISSET(udpfd, &rset))
