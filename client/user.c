@@ -246,26 +246,40 @@ void questionSubmit(char *inputptr, char *message, char *response, int tcpfd, st
     //filename number of chars??
     //o ponto faz parte do nome ou da extensao?
 
-    char question[11], filename[NAME_MAX + 3], imagefilename[NAME_MAX + 3];
+    FILE *fp;
+    char question[11] = NULL, filename[NAME_MAX + 3] = NULL, imagefilename[NAME_MAX + 3] = NULL, *ptr, messageTMP[2048], qdata[2048];
     sscanf(inputptr, "%s %s %s", question, filename, imagefilename);
+    ssize_t qsize = 0, nbytes = 0, nleft = 0, nwritten = 0, nread = 0;
 
-    strcpy(message, "QUS ");
-    strcat(message, userid);
+    sscanf(inputptr, "%s %s %s", question, filename, imagefilename);
+    printf("INPUT:%s\nNAMELIMIT:%ld\nfilename:%s\nquestion:%s\nimagefilename:%s\n", inputptr, NAME_MAX, filename, question, imagefilename);
+    fp = fopen(filename, "r");
+    fseek(fp, 0L, SEEK_END);
+    qsize = ftell(fp);
+
+    /* Read and display data */
+    fread(qdata, 2048, 1, fp);
+    printf("%s\n", qdata);
+    fclose(fp);
+    sprintf(message, "QUS %d", userid);
     strcat(message, " ");
     strcat(message, topic_list[active_topic_number].name);
     strcat(message, " ");
     strcat(message, question);
     strcat(message, " ");
-    strcat(message, qsize);
+    strcpy(messageTMP, message);
+    sprintf(message, "%s %ld", messageTMP, qsize);
     strcat(message, " ");
-    strcat(message, question);
+    strcat(message, qdata);
     strcat(message, " ");
+
+    printf("MESSAGE: %s\n", message);
     nbytes = 7;
 
     nleft = nbytes;
     while (nleft > 0)
     {
-        if ((nwritten = write(fd, ptr, nleft)) <= 0)
+        if ((nwritten = write(tcpfd, ptr, nleft)) <= 0)
             exit(1);
         nleft -= nwritten;
         ptr += nwritten;
