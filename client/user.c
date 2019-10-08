@@ -91,19 +91,35 @@ int sendUDP(int udpfd, struct addrinfo **resudp, char *message, char *response)
     return n;
 }
 
-int sendTCP(int tcpfd, struct addrinfo **restcp, char *message, char *response)
+void sendTCP(int tcpfd, char *message, char *response)
 {
-    struct sockaddr_in addr;
-    socklen_t addrlen;
-    ssize_t n;
-    if (sendto(tcpfd, message, strlen(message), 0, (*restcp)->ai_addr, (*restcp)->ai_addrlen) == -1)
-        return -1;
-    addrlen = sizeof(addr);
-    n = recvfrom(tcpfd, response, 2048, 0, (struct sockaddr *)&addr, &addrlen);
-    if (n == -1)
-        exit(EXIT_FAILURE);
-    response[n] = '\0'; // Appends a '\0' to the response so it can be used in strcmp
-    return n;
+    ssize_t nbytes = strlen(message), nleft, nwritten, nread;
+    char *ptr;
+    nleft = nbytes;
+    printf("nbytes %zu\n%s\nresponse %s\n", nbytes, message, response);
+    ptr = message;
+    while (nleft > 0)
+    {
+        if ((nwritten = write(tcpfd, ptr, nleft)) <= 0)
+            break;
+        nleft -= nwritten;
+        ptr += nwritten;
+    }
+    ptr = response;
+    nleft = nbytes;
+    while (nleft > 0)
+    {
+        if ((nread = read(tcpfd, response, nleft)) == -1)
+            break;
+        else if (nread == 0)
+            break;
+        printf("OI");
+        nleft -= nread;
+        ptr += nread;
+    }
+    nread = nbytes - nleft;
+    printf("nbytes %zu\n%s\nresponse %s\n", nbytes, message, response);
+    //return response
 }
 
 /////////////
@@ -128,7 +144,7 @@ void registerUser(int *userid, char *inputptr, char *message, char *response, in
 void topicList(char *message, char *response, int udpfd, struct addrinfo *resudp, int *number_of_topics, Topic *topic_list)
 {
     char delim[3] = ": ";
-    int n;
+    int n, i;
 
     strcpy(message, "LTP\n");
     sendUDP(udpfd, &resudp, message, response);
@@ -136,7 +152,7 @@ void topicList(char *message, char *response, int udpfd, struct addrinfo *resudp
     n = atoi(strtok(NULL, delim));
     *number_of_topics = n;
     printf("Available topics:\n");
-    for (int i = 1; i <= n; i++)
+    for (i = 1; i <= n; i++)
     {
         strcpy(topic_list[i].name, strtok(NULL, delim));
         topic_list[i].id = atoi(strtok(NULL, delim));
@@ -146,7 +162,7 @@ void topicList(char *message, char *response, int udpfd, struct addrinfo *resudp
 }
 void topicSelect(char *inputptr, int *active_topic_number, int number_of_topics, Topic *topic_list, bool selectByNumber, char *buffer)
 {
-    int tmp_topic_number = 0;
+    int tmp_topic_number = 0, i;
     if (selectByNumber)
     {
         char small_buffer[5];
@@ -165,7 +181,7 @@ void topicSelect(char *inputptr, int *active_topic_number, int number_of_topics,
     else
     {
         sscanf(inputptr, "%s", buffer);
-        for (int i = 1; i <= number_of_topics; i++)
+        for (i = 1; i <= number_of_topics; i++)
             if (!strcmp(buffer, topic_list[i].name))
             {
                 printf("Selected topic: %s (proposed by %d)\n\n", topic_list[i].name, topic_list[i].id);
@@ -203,7 +219,7 @@ void topicPropose(char *inputptr, char *message, char *response, int udpfd, stru
 void questionList(char *message, char *response, int udpfd, struct addrinfo *resudp,
                   int active_topic_number, int number_of_topics, Topic *topic_list)
 {
-    int number_of_questions, question_id, question_na;
+    int number_of_questions, question_id, question_na, i;
     char question_name[16];
     char delim[3] = ": ";
 
@@ -218,7 +234,7 @@ void questionList(char *message, char *response, int udpfd, struct addrinfo *res
         number_of_questions = atoi(strtok(NULL, delim));
 
         printf("%d questions available for topic %s:\n", number_of_questions, topic_list[active_topic_number].name);
-        for (int i = 1; i <= number_of_questions; i++)
+        for (i = 1; i <= number_of_questions; i++)
         {
             strcpy(question_name, strtok(NULL, delim));
             question_id = atoi(strtok(NULL, delim));
@@ -259,13 +275,11 @@ void questionGet(char *message, char *response, int tcpfd, struct addrinfo *rest
 }
 void questionSubmit(char *inputptr, char *message, char *response, int tcpfd, struct addrinfo *restcp, int userid, int active_topic_number, Topic *topic_list)
 {
-    //filename number of chars??
-    //o ponto faz parte do nome ou da extensao?
-
     FILE *fp;
+    int i;
     char question[11], filename[NAME_MAX + 3], imagefilename[NAME_MAX + 3], *ptr, messageTMP[2048], qdata[2048], iext[4];
     imagefilename[0] = '\0';
-    unsigned char idata[2048];
+    unsigned char *idata;
     sscanf(inputptr, "%s %s %s", question, filename, imagefilename);
     ssize_t qsize = 0, isize = 0, nbytes = 0, nleft = 0, nwritten = 0, nread = 0;
 
@@ -302,12 +316,22 @@ void questionSubmit(char *inputptr, char *message, char *response, int tcpfd, st
             return;
         }
         getImageExtension(imagefilename, iext);
-        fread(idata, 2048, 1, fp);
+
         //printf("%s\n", idata);
         fseek(fp, 0L, SEEK_END);
         isize = ftell(fp);
+        fseek(fp, 0L, SEEK_SET);
+        idata = malloc(sizeof(char) * isize);
+        fread(idata, sizeof(char) * isize, 1, fp);
         fclose(fp);
 
+        /*TESTAR SE IMAGEM ESTA BEM
+        fp = fopen("damn.jpg", "wb");
+        fwrite(idata, sizeof(char) * isize, 1, fp);
+        fclose(fp);
+        */
+
+        message = malloc(sizeof(char) * 2048);
         strcat(message, " 1 ");
         strcat(message, iext);
         strcpy(messageTMP, message);
@@ -319,8 +343,8 @@ void questionSubmit(char *inputptr, char *message, char *response, int tcpfd, st
     {
         strcat(message, " 0");
     }
-
-    printf("%s\n\n", message);
+    sendTCP(tcpfd, message, response);
+    printf("%s\n\n", response);
     nbytes = 7;
 
     nleft = nbytes;
@@ -331,15 +355,17 @@ void questionSubmit(char *inputptr, char *message, char *response, int tcpfd, st
         nleft -= nwritten;
         ptr += nwritten;
     }
+    //free(idata);
 }
 void answerSubmit()
 {
 }
-void quit(struct addrinfo *restcp, struct addrinfo *resudp, int udpfd)
+void quit(struct addrinfo *restcp, struct addrinfo *resudp, int udpfd, int tcpfd)
 {
     freeaddrinfo(restcp);
     freeaddrinfo(resudp);
     close(udpfd);
+    close(tcpfd);
     exit(EXIT_SUCCESS);
 }
 
@@ -352,9 +378,9 @@ int main(int argc, char **argv)
     int tcpfd, udpfd, errcode, active_topic_number = 0, number_of_topics = 0, userid = 0;
     struct sigaction act;
 
-    char port[16], hostname[128], buffer[128], input[128], command[128], message[2048], response[2048], active_question[11];
-    char *inputptr, *ptr;
-
+    char port[16], hostname[128], buffer[128], input[128], command[128], response[2048], active_question[11];
+    char *inputptr, *ptr, *message;
+    message = malloc(sizeof(char) * 2048);
     //memset(topic_list, 0, sizeof topic_list);
 
     setHostNameAndPort(argc, argv, hostname, port);
@@ -396,7 +422,7 @@ int main(int argc, char **argv)
         inputptr += strlen(command) + 1; // Points to arguments of the command
 
         if (!strcmp(command, "exit"))
-            quit(restcp, resudp, udpfd);
+            quit(restcp, resudp, udpfd, tcpfd);
         else if (!strcmp(command, "register") || !strcmp(command, "reg"))
             registerUser(&userid, inputptr, message, response, udpfd, resudp);
 

@@ -22,7 +22,8 @@ int topic_amount = 0;
 
 int isAlphanumeric(char *str)
 {
-    for (int i = 0; str[i] != '\0'; i++)
+    int i;
+    for (i = 0; str[i] != '\0'; i++)
         if (!isalpha(str[i]) && !isdigit(str[i]))
             return 0;
     return 1;
