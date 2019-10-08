@@ -187,7 +187,7 @@ int receiveudp(int udpfd, char *buffer, struct sockaddr_in *cliaddr, socklen_t *
             sprintf(answer_path, "%s/%s/anscount.txt", pathname, entry->d_name);
             if ((file = fopen(answer_path, "r")) == NULL)
                 exit(1);
-            fscanf(file, "%d", &answer_amount);
+            fscanf(file, "%d\n", &answer_amount);
 
             strtok(entry->d_name, delim);
             strcpy(question_name, strtok(NULL, delim));
@@ -226,7 +226,7 @@ int receivetcp(int connfd, char *buffer, struct sockaddr_in *cliaddr, socklen_t 
 {
     char request[128], response[2048];
     long buffer_size = 2048;
-    int id, n;
+    int n;
     long realloc_aux;
     char *bufferptr;
 
@@ -270,11 +270,18 @@ int receivetcp(int connfd, char *buffer, struct sockaddr_in *cliaddr, socklen_t 
         sscanf(buffer, "QUS %d %s %s %ld", &quserid, topic, question, &qsize);
 
         realloc_aux = bufferptr - buffer;
-        if ((buffer = (char *)realloc(buffer, (2048 + qsize) * sizeof(char))) == NULL)
+        if ((buffer = (char *)realloc(buffer, (buffer_size + qsize) * sizeof(char))) == NULL)
             return -1;
         bufferptr = buffer + realloc_aux;
 
         printf("User %d is trying to submit question %s in topic %s... ", quserid, question, topic);
+
+        if (strlen(topic) > 10 || !isAlphanumeric(topic))
+        {
+            printf("invalid\n");
+            write_full(connfd, "QUR NOK\n");
+            return 0;
+        }
 
         // Opens topic folder
         if ((dir = opendir("server/topics")) == NULL)
@@ -336,9 +343,11 @@ int receivetcp(int connfd, char *buffer, struct sockaddr_in *cliaddr, socklen_t 
         // Creates answer count file
         strcpy(path_aux, pathname);
         strcat(path_aux, "/anscount.txt");
-        if ((fd = open(path_aux, O_WRONLY | O_CREAT, S_IRUSR)) < 0)
+        if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0666)) < 0)
             return -1;
         if (write(fd, "0", 1) != 1)
+            return -1;
+        if (write(fd, "\n", 1) != 1)
             return -1;
         if (close(fd) < 0)
             return -1;
@@ -346,7 +355,7 @@ int receivetcp(int connfd, char *buffer, struct sockaddr_in *cliaddr, socklen_t 
         // Creates question info file
         strcpy(path_aux, pathname);
         strcat(path_aux, "/qinfo.txt");
-        if ((fd = open(path_aux, O_WRONLY | O_CREAT, S_IRUSR)) < 0)
+        if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0666)) < 0)
             return -1;
         while ((n = read(connfd, bufferptr, qsize)) != 0)
         {
@@ -396,7 +405,7 @@ int receivetcp(int connfd, char *buffer, struct sockaddr_in *cliaddr, socklen_t 
             sscanf(ptr_aux, " %s %ld ", iext, &isize);
 
             realloc_aux = bufferptr - buffer;
-            if ((buffer = (char *)realloc(buffer, (2048 + qsize + isize) * sizeof(char))) == NULL)
+            if ((buffer = (char *)realloc(buffer, (buffer_size + qsize + isize) * sizeof(char))) == NULL)
                 return -1;
             bufferptr = buffer + realloc_aux;
 
@@ -404,7 +413,7 @@ int receivetcp(int connfd, char *buffer, struct sockaddr_in *cliaddr, socklen_t 
             strcat(path_aux, "/qimg.");
             strcat(path_aux, iext);
 
-            if ((fd = open(path_aux, O_WRONLY | O_CREAT, S_IRUSR)) < 0)
+            if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0666)) < 0)
                 return -1;
             while ((n = read(connfd, bufferptr, isize)) != 0)
             {
@@ -465,7 +474,232 @@ int receivetcp(int connfd, char *buffer, struct sockaddr_in *cliaddr, socklen_t 
     }
     else if (!strcmp(request, "ANS"))
     {
-        return 0;
+        int space_count = 0, answer_count = 0;
+        int auserid, n, fd, nw;
+        long asize;
+        DIR *dir;
+        struct dirent *entry;
+        char delim[2] = "_";
+        char *ptr;
+        char topic[16], cmp[16], question[16], pathname[128], path_aux[128], topic_folder[32], question_folder[32], ansf[4], answer_name[32];
+
+        do
+        { // Reads until 4th space (between asize and adata)
+            if ((n = read(connfd, bufferptr, 1)) <= 0)
+                exit(1);
+            if (*bufferptr == ' ')
+                space_count++;
+            bufferptr += n;
+        } while (space_count < 4);
+
+        // Scans command information
+        sscanf(buffer, "ANS %d %s %s %ld", &auserid, topic, question, &asize);
+
+        realloc_aux = bufferptr - buffer;
+        if ((buffer = (char *)realloc(buffer, (buffer_size + asize) * sizeof(char))) == NULL)
+            return -1;
+        bufferptr = buffer + realloc_aux;
+
+        printf("User %d is trying to submit answer for question %s in topic %s... ", auserid, question, topic);
+
+        // Opens topic folder
+        if ((dir = opendir("server/topics")) == NULL)
+            return -1;
+        readdir(dir); // Skips directory .
+        readdir(dir); // Skips directory ..
+        while ((entry = readdir(dir)) != NULL)
+        {
+            strcpy(topic_folder, entry->d_name);
+            strtok(entry->d_name, delim);
+            strcpy(cmp, strtok(NULL, delim));
+            if (!strcmp(cmp, topic))
+            {
+                sprintf(pathname, "server/topics/%s", topic_folder);
+                break;
+            }
+        }
+        closedir(dir);
+
+        // Opens question folder
+        if ((dir = opendir(pathname)) == NULL)
+            return -1;
+        readdir(dir); // Skips directory .
+        readdir(dir); // Skips directory ..
+        while ((entry = readdir(dir)) != NULL)
+        {
+            strcpy(question_folder, entry->d_name);
+            strtok(entry->d_name, delim);
+            strcpy(cmp, strtok(NULL, delim));
+            if (!strcmp(cmp, question))
+            {
+                strcat(pathname, "/");
+                strcat(pathname, question_folder);
+                break;
+            }
+        }
+        closedir(dir);
+
+        // Checking number of answers
+        strcpy(path_aux, pathname);
+        strcat(path_aux, "/anscount.txt");
+
+        if ((fd = open(path_aux, O_RDONLY)) < 0)
+            return -1;
+        if (read(fd, ansf, 2) != 2)
+            return -1;
+        if (close(fd) < 0)
+            return -1;
+
+        answer_count = atoi(ansf);
+
+        if (answer_count >= 99)
+        {
+            write_full(connfd, "ANR FUL\n");
+            return 0;
+        }
+        else
+        {
+            if ((fd = open(path_aux, O_WRONLY | O_TRUNC)) < 0)
+                return -1;
+            answer_count++;
+            sprintf(ansf, "%d\n", answer_count);
+            if (write(fd, ansf, (answer_count > 9 ? 3 : 2)) != (answer_count > 9 ? 3 : 2))
+                return -1;
+
+            if (close(fd) < 0)
+                return -1;
+        }
+
+        // Creates answer text file
+        strcpy(path_aux, pathname);
+        strcat(path_aux, "/");
+        if (answer_count > 9)
+            sprintf(answer_name, "%d_%d.txt", answer_count, auserid);
+        else
+            sprintf(answer_name, "0%d_%d.txt", answer_count, auserid);
+        strcat(path_aux, answer_name);
+
+        if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0666)) < 0)
+            return -1;
+        while ((n = read(connfd, bufferptr, asize)) != 0)
+        {
+            if (n == -1)
+                return -1;
+            ptr = bufferptr;
+            asize -= n;
+
+            while (n > 0)
+            {
+                if ((nw = write(fd, ptr, n)) <= 0)
+                    return -1;
+                n -= nw;
+                ptr += nw;
+            }
+            bufferptr += n;
+        }
+
+        if (close(fd) < 0)
+            return -1;
+
+        // Reads space between adata and aIMG
+        if ((n = read(connfd, bufferptr, 1)) <= 0)
+            return -1;
+        bufferptr += n;
+
+        // Reads aIMG
+        if ((n = read(connfd, bufferptr, 1)) <= 0)
+            return -1;
+        bufferptr += n;
+
+        if (*(bufferptr - n) == '1') // Has image to read
+        {
+            char *ptr_aux = bufferptr;
+            char iext[4];
+            long isize;
+            space_count = 0;
+            do // Reads 3 more spaces (until the space between isize and idata)
+            {
+                if ((n = read(connfd, bufferptr, 1)) <= 0)
+                    exit(1);
+                if (*bufferptr == ' ')
+                    space_count++;
+                bufferptr += n;
+            } while (space_count < 3);
+
+            sscanf(ptr_aux, " %s %ld ", iext, &isize);
+
+            realloc_aux = bufferptr - buffer;
+            if ((buffer = (char *)realloc(buffer, (buffer_size + asize + isize) * sizeof(char))) == NULL)
+                return -1;
+            bufferptr = buffer + realloc_aux;
+
+            strcpy(path_aux, pathname);
+            strcat(path_aux, "/");
+            if (answer_count > 9)
+                sprintf(answer_name, "%d_%d.%s", answer_count, auserid, iext);
+            else
+                sprintf(answer_name, "0%d_%d.%s", answer_count, auserid, iext);
+            strcat(path_aux, answer_name);
+            
+
+            if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0666)) < 0)
+                return -1;
+            while ((n = read(connfd, bufferptr, isize)) != 0)
+            {
+                if (n == -1)
+                    return -1;
+                ptr = bufferptr;
+                isize -= n;
+                while (n > 0)
+                {
+                    if ((nw = write(fd, ptr, n)) <= 0)
+                        return -1;
+                    n -= nw;
+                    ptr += nw;
+                }
+                bufferptr += n;
+            }
+            if (close(fd) < 0)
+                return -1;
+
+            if ((n = read(connfd, bufferptr, 1)) <= 0)
+                return -1;
+            if (*bufferptr == '\n')
+            {
+                printf("success\n");
+                write_full(connfd, "ANR OK\n");
+                return 0;
+            }
+            else
+            {
+                printf("failure\n");
+                write_full(connfd, "ANR NOK\n");
+                return 0;
+            }
+        }
+        else if (*(bufferptr - n) == '0') // Has no image to read
+        {
+            if ((n = read(connfd, bufferptr, 1)) <= 0)
+                return -1;
+            if (*bufferptr == '\n')
+            {
+                printf("success\n");
+                write_full(connfd, "ANR OK\n");
+                return 0;
+            }
+            else
+            {
+                printf("failure\n");
+                write_full(connfd, "ANR NOK\n");
+                return 0;
+            }
+        }
+        else
+        {
+            printf("failure\n");
+            write_full(connfd, "ANR NOK\n");
+            return 0;
+        }
     }
     else
     {
@@ -478,14 +712,12 @@ int receivetcp(int connfd, char *buffer, struct sockaddr_in *cliaddr, socklen_t 
 int main(int argc, char **argv)
 {
 
-    int listenfd, connfd, udpfd, nready, maxfdp1, errcode, n;
+    int listenfd, connfd, udpfd, nready, maxfdp1, errcode;
     char buffer[2048], port[16];
     fd_set rset;
     struct sockaddr_in cliaddr;
     struct addrinfo hintstcp, hintsudp, *restcp, *resudp;
     socklen_t len;
-    ssize_t nw;
-    char *ptr;
     struct sigaction act, act2;
     pid_t childpid;
     DIR *dir;
@@ -589,25 +821,6 @@ int main(int argc, char **argv)
                     exit(1);
                 else
                     exit(0);
-                /*
-                while ((n = read(connfd, buffer, 128)) != 0)
-                {
-                    if (n == -1)
-                        exit(1);
-                    ptr = &buffer[0];
-                    while (n > 0)
-                    {
-                        if ((nw = write(connfd, ptr, n)) <= 0)
-                            exit(1);
-                        n -= nw;
-                        ptr += nw;
-                    }
-                }
-                write(1, "received from tcp: ", 19);
-                write(1, buffer, strlen(buffer));
-                close(connfd);
-                exit(0);
-                */
             }
             else if (childpid == -1)
                 exit(1);
