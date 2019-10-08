@@ -60,6 +60,22 @@ void setHostNameAndPort(int argc, char **argv, char *hostname, char *port)
     }
 }
 
+void getImageExtension(char *imagefilename, char *iext)
+{
+    int i, j = 0, imagefilename_length = strlen(imagefilename);
+    for (i = 0; i < imagefilename_length; i++)
+    {
+        if (imagefilename[i] == '.')
+            break;
+    }
+    for (i++; i < imagefilename_length; i++)
+    {
+        if (j == 3)
+            break;
+        iext[j++] = imagefilename[i];
+    }
+}
+
 int sendUDP(int udpfd, struct addrinfo **resudp, char *message, char *response)
 {
     struct sockaddr_in addr;
@@ -247,40 +263,71 @@ void questionSubmit(char *inputptr, char *message, char *response, int tcpfd, st
     //o ponto faz parte do nome ou da extensao?
 
     FILE *fp;
-    char question[11] = NULL, filename[NAME_MAX + 3] = NULL, imagefilename[NAME_MAX + 3] = NULL, *ptr, messageTMP[2048], qdata[2048];
+    char question[11], filename[NAME_MAX + 3], imagefilename[NAME_MAX + 3], *ptr, messageTMP[2048], qdata[2048], iext[4];
+    imagefilename[0] = '\0';
+    unsigned char idata[2048];
     sscanf(inputptr, "%s %s %s", question, filename, imagefilename);
-    ssize_t qsize = 0, nbytes = 0, nleft = 0, nwritten = 0, nread = 0;
+    ssize_t qsize = 0, isize = 0, nbytes = 0, nleft = 0, nwritten = 0, nread = 0;
 
     sscanf(inputptr, "%s %s %s", question, filename, imagefilename);
-    printf("INPUT:%s\nNAMELIMIT:%ld\nfilename:%s\nquestion:%s\nimagefilename:%s\n", inputptr, NAME_MAX, filename, question, imagefilename);
+    //printf("INPUT:%s\nNAMELIMIT:%d\nfilename:%s\nquestion:l%s\nimagefilename:%s\n", inputptr, NAME_MAX, filename, question, imagefilename);
     fp = fopen(filename, "r");
+    if (fp == NULL)
+    {
+        printf("Question File Not Found!\n\n");
+        return;
+    }
+    fread(qdata, 2048, 1, fp);
+    strtok(qdata, "\n");
     fseek(fp, 0L, SEEK_END);
     qsize = ftell(fp);
-
-    /* Read and display data */
-    fread(qdata, 2048, 1, fp);
-    printf("%s\n", qdata);
     fclose(fp);
+
     sprintf(message, "QUS %d", userid);
     strcat(message, " ");
     strcat(message, topic_list[active_topic_number].name);
-    strcat(message, " ");
+    //strcat(message, " ");
     strcat(message, question);
-    strcat(message, " ");
+    //strcat(message, " ");
     strcpy(messageTMP, message);
     sprintf(message, "%s %ld", messageTMP, qsize);
     strcat(message, " ");
     strcat(message, qdata);
-    strcat(message, " ");
+    if (imagefilename[0] != '\0')
+    {
+        fp = fopen(imagefilename, "rb");
+        if (fp == NULL)
+        {
+            printf("Image File Not Found!\n\n");
+            return;
+        }
+        getImageExtension(imagefilename, iext);
+        fread(idata, 2048, 1, fp);
+        //printf("%s\n", idata);
+        fseek(fp, 0L, SEEK_END);
+        isize = ftell(fp);
+        fclose(fp);
 
-    printf("MESSAGE: %s\n", message);
+        strcat(message, " 1 ");
+        strcat(message, iext);
+        strcpy(messageTMP, message);
+        sprintf(message, "%s %ld", messageTMP, isize);
+        strcat(message, " ");
+        strcat(message, idata);
+    }
+    else
+    {
+        strcat(message, " 0");
+    }
+
+    printf("%s\n\n", message);
     nbytes = 7;
 
     nleft = nbytes;
     while (nleft > 0)
     {
         if ((nwritten = write(tcpfd, ptr, nleft)) <= 0)
-            exit(1);
+            break;
         nleft -= nwritten;
         ptr += nwritten;
     }
