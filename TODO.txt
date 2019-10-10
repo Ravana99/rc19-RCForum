@@ -1,9 +1,11 @@
-• Answers are identified by the question title concatenated with an underscore and a
-2-digit number, assigned sequentially. A FS server will not accept more than 99 topics. 
+• Timeout for UDP requests
 
-• The questions received for each topic are stored by the FS in the corresponding folder,
+• "Answers are identified by the question title concatenated with an underscore and a
+2-digit number, assigned sequentially. A FS server will not accept more than 99 topics."
+
+• "The questions received for each topic are stored by the FS in the corresponding folder,
 using a file named with the question title and extension “.txt”. If the question is
 accompanied by an image, the image is also stored with the same name and the original
 file extension (different from “.txt”). When the FS server starts, the questions and
 answers already available in the respective directories will be available for consultation
-by the users.
+by the users."

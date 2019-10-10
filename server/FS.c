@@ -207,11 +207,9 @@ int receiveudp(int udpfd, char *buffer, struct sockaddr_in *cliaddr, socklen_t *
     return sendto(udpfd, response, strlen(response), 0, (struct sockaddr *)cliaddr, *len);
 }
 
-// NEEDS TESTING
-void write_full(int fd, char *message)
+void write_full(int fd, char *message, long n)
 {
     int nw;
-    int n = strlen(message);
     char *messageptr = &message[0];
     while (n > 0)
     {
@@ -222,9 +220,22 @@ void write_full(int fd, char *message)
     }
 }
 
+void read_full(int fd, char **responseptr, long n)
+{
+    int nr;
+
+    while (n > 0)
+    {
+        if ((nr = read(fd, *responseptr, n)) <= 0)
+            exit(1);
+        n -= nr;
+        *responseptr += nr;
+    }
+}
+
 int receivetcp(int connfd, char *buffer, struct sockaddr_in *cliaddr, socklen_t *len)
 {
-    char request[128], response[2048];
+    char request[128];
     long buffer_size = 2048;
     int n;
     long realloc_aux;
@@ -235,7 +246,7 @@ int receivetcp(int connfd, char *buffer, struct sockaddr_in *cliaddr, socklen_t 
     do
     {
         if ((n = read(connfd, bufferptr, 1)) <= 0)
-            exit(1);
+            return -1;
         bufferptr += n;
     } while (*(bufferptr - n) != ' ');
 
@@ -243,7 +254,360 @@ int receivetcp(int connfd, char *buffer, struct sockaddr_in *cliaddr, socklen_t 
 
     if (!strcmp(request, "GQU"))
     {
+        char id[16], topic[16], question[16], pathname[128], topic_folder[32], question_folder[32], cmp[16], path_aux[128], ansf[4], img[16], iext[8], aux[64];
+        char *response, *responseptr;
+        int answer_count, fd, i, j, topic_found = 0, question_found = 0, img_found = 0, quserid = -1;
+        long ressize = 2048, qsize, isize;
+        DIR *dir;
+        FILE *fp;
+        struct dirent *entry;
+        char delim[2] = "_";
+
+        if ((response = (char *)malloc(2048 * sizeof(char))) == NULL)
+            return -1;
+
+        responseptr = &response[0];
+
+        do
+        { // Reads until '\n'
+            if ((n = read(connfd, bufferptr, 1)) <= 0)
+                return -1;
+            bufferptr += n;
+        } while (*(bufferptr - n) != '\n');
+
+        if (sscanf(buffer, "GQU %s %s\n", topic, question) != 2) {
+            write_full(connfd, "QGR ERR\n", strlen("QGR ERR\n"));
+            free(response);
+            return 0;
+        }
+
+        // Opens topic folder
+        if ((dir = opendir("server/topics")) == NULL)
+            return -1;
+        readdir(dir); // Skips directory .
+        readdir(dir); // Skips directory ..
+        while ((entry = readdir(dir)) != NULL)
+        {
+            strcpy(topic_folder, entry->d_name);
+            strtok(entry->d_name, delim);
+            strcpy(cmp, strtok(NULL, delim));
+            if (!strcmp(cmp, topic))
+            {
+                sprintf(pathname, "server/topics/%s", topic_folder);
+                topic_found = 1;
+                break;
+            }
+        }
+        closedir(dir);
+
+        if (!topic_found) {
+            write_full(connfd, "QGR EOF\n", strlen("QGR EOF\n"));
+            free(response);
+            return 0;
+        }
+
+        // Opens question folder
+        if ((dir = opendir(pathname)) == NULL)
+            return -1;
+        readdir(dir); // Skips directory .
+        readdir(dir); // Skips directory ..
+        while ((entry = readdir(dir)) != NULL)
+        {
+            strcpy(question_folder, entry->d_name);
+            strtok(entry->d_name, delim);
+            strcpy(cmp, strtok(NULL, delim));
+            strcpy(id, strtok(NULL, delim)); // Gets user ID
+            if (!strcmp(cmp, question))
+            {
+                question_found = 1;
+                strcat(pathname, "/");
+                strcat(pathname, question_folder);
+                quserid = atoi(id);
+                break;
+            }
+        }
+        closedir(dir);
+
+        if (!question_found) {
+            write_full(connfd, "QGR EOF\n", strlen("QGR EOF\n"));
+            free(response);
+            return 0;
+        }
+
+        // Checking number of answers
+        strcpy(path_aux, pathname);
+        strcat(path_aux, "/anscount.txt");
+
+        if ((fd = open(path_aux, O_RDONLY)) < 0)
+            return -1;
+        if (read(fd, ansf, 2) != 2)
+            return -1;
+        if (close(fd) < 0)
+            return -1;
+
+        answer_count = atoi(ansf);
+
+        // Determining size of question file
+        strcpy(path_aux, pathname);
+        strcat(path_aux, "/qinfo.txt");
+        if ((fp = fopen(path_aux, "r")) == NULL)
+            return -1;
+        fseek(fp, 0L, SEEK_END);
+        qsize = ftell(fp);
+        fclose(fp);
+
+        ressize += qsize;
+        realloc_aux = responseptr - response;
+        if ((response = (char *)realloc(response, ressize * sizeof(char))) == NULL)
+            return -1;
+        responseptr = response + realloc_aux;
+
+        sprintf(response, "QGR %d %ld ", quserid, qsize);
+        responseptr = response + strlen(response);
+
+        // Opens question text file
+        if ((fd = open(path_aux, O_RDONLY)) < 0)
+            return -1;
+
+        read_full(fd, &responseptr, qsize);
+
+        if (close(fd) < 0)
+            return -1;
+
+        memcpy(responseptr, " ", 1);
+        responseptr++;
+
+        // Opens image file if one exists
+        if ((dir = opendir(pathname)) == NULL)
+            return -1;
+        readdir(dir); // Skips directory .
+        readdir(dir); // Skips directory ..
+        while ((entry = readdir(dir)) != NULL)
+        {
+            strcpy(cmp, entry->d_name);
+            cmp[5] = '\0';
+            if (!strcmp(cmp, "qimg."))
+            {
+                img_found = 1;
+                strcpy(img, entry->d_name);
+                strcpy(path_aux, pathname);
+                strcat(path_aux, "/");
+                strcat(path_aux, entry->d_name);
+                break;
+            }
+        }
+        closedir(dir);
+
+        if (img_found)
+        {
+            img_found = 0;
+            memcpy(responseptr, "1 ", 2);
+            responseptr += 2;
+            sscanf(img, "qimg.%s", iext);
+            memcpy(responseptr, iext, 3);
+            responseptr += 3;
+            memcpy(responseptr, " ", 1);
+            responseptr += 1;
+
+            if ((fp = fopen(path_aux, "r")) == NULL)
+                return -1;
+            fseek(fp, 0L, SEEK_END);
+            isize = ftell(fp);
+            fclose(fp);
+
+            ressize += isize;
+            realloc_aux = responseptr - response;
+            if ((response = (char *)realloc(response, ressize * sizeof(char))) == NULL)
+                return -1;
+            responseptr = response + realloc_aux;
+
+            sprintf(aux, "%ld", isize);
+            memcpy(responseptr, aux, strlen(aux));
+            responseptr += strlen(aux);
+            memcpy(responseptr, " ", 1);
+            responseptr += 1;
+
+            // Opens image file
+            if ((fd = open(path_aux, O_RDONLY)) < 0)
+                return -1;
+
+            read_full(fd, &responseptr, isize);
+
+            if (close(fd) < 0)
+                return -1;
+
+            memcpy(responseptr, " ", 1);
+            responseptr += 1;
+        }
+        else
+        {
+            memcpy(responseptr, "0 ", 2);
+            responseptr += 2;
+        }
+        sprintf(aux, "%d", answer_count);
+        if (answer_count >= 10)
+        {
+            memcpy(responseptr, "10", 2);
+            responseptr += 2;
+        }
+        else
+        {
+            memcpy(responseptr, aux, 1);
+            responseptr += 1;
+        }
+
+        for (i = answer_count, j = 0; i > 0 && j < 10; i--, j++)
+        {
+
+            char i_txt[4], delim2[3] = "_.", aiext[8], answer[32];
+            long asize, aisize;
+            int auserid;
+
+            if (i < 10)
+                sprintf(i_txt, "0%d", i);
+            else
+                sprintf(i_txt, "%d", i);
+
+            // Opens question folder
+            if ((dir = opendir(pathname)) == NULL)
+                return -1;
+            readdir(dir); // Skips directory .
+            readdir(dir); // Skips directory ..
+            while ((entry = readdir(dir)) != NULL)
+            {
+                strcpy(answer, entry->d_name);
+                strcpy(cmp, strtok(entry->d_name, delim2));
+                strcpy(id, strtok(NULL, delim2)); // Gets user ID
+                if (!strcmp(i_txt, cmp))
+                {
+                    auserid = atoi(id);
+                    break;
+                }
+            }
+            closedir(dir);
+
+            write(1, "checkpoint 1\n", 13);
+
+            // Determining size of answer text file
+            strcpy(path_aux, pathname);
+            strcat(path_aux, "/");
+            strcat(path_aux, answer);
+            if ((fp = fopen(path_aux, "r")) == NULL)
+                return -1;
+            fseek(fp, 0L, SEEK_END);
+            asize = ftell(fp);
+            fclose(fp);
+
+            ressize += asize;
+            realloc_aux = responseptr - response;
+            if ((response = (char *)realloc(response, ressize * sizeof(char))) == NULL)
+                return -1;
+            responseptr = response + realloc_aux;
+
+            sprintf(aux, " %s %d %ld ", i_txt, auserid, asize);
+            memcpy(responseptr, aux, strlen(aux));
+            responseptr += strlen(aux);
+
+            write(1, "checkpoint 2\n", 13);
+
+            // Opens answer text file
+            if ((fd = open(path_aux, O_RDONLY)) < 0)
+                return -1;
+
+            read_full(fd, &responseptr, asize);
+
+            if (close(fd) < 0)
+                return -1;
+
+            memcpy(responseptr, " ", 1);
+            responseptr++;
+
+            write(1, "checkpoint 3\n", 13);
+
+            // Opens image file if one exists
+            if ((dir = opendir(pathname)) == NULL)
+                return -1;
+            readdir(dir); // Skips directory .
+            readdir(dir); // Skips directory ..
+            while ((entry = readdir(dir)) != NULL)
+            {
+                strcpy(answer, entry->d_name);
+                strcpy(cmp, strtok(entry->d_name, delim2));
+                strcpy(id, strtok(NULL, delim2));
+                strcpy(aiext, strtok(NULL, delim2));
+
+                if (!strcmp(i_txt, cmp) && strcmp(aiext, ".txt"))
+                {
+                    img_found = 1;
+                    strcpy(img, entry->d_name);
+                    strcpy(path_aux, pathname);
+                    strcat(path_aux, "/");
+                    strcat(path_aux, answer);
+                    break;
+                }
+            }
+            closedir(dir);
+
+            write(1, "checkpoint 4\n", 13);
+
+            if (img_found)
+            {
+                img_found = 0;
+                memcpy(responseptr, "1 ", 2);
+                responseptr += 2;
+                memcpy(responseptr, aiext, 3);
+                responseptr += 3;
+                memcpy(responseptr, " ", 1);
+                responseptr += 1;
+
+                printf("%s\n", path_aux);
+
+                if ((fp = fopen(path_aux, "r")) == NULL)
+                    return -1;
+                fseek(fp, 0L, SEEK_END);
+                aisize = ftell(fp);
+                fclose(fp);
+
+                write(1, "checkpoint 5\n", 13);
+
+                ressize += aisize;
+                realloc_aux = responseptr - response;
+                if ((response = (char *)realloc(response, ressize * sizeof(char))) == NULL)
+                    return -1;
+                responseptr = response + realloc_aux;
+
+                sprintf(aux, "%ld", aisize);
+                memcpy(responseptr, aux, strlen(aux));
+                responseptr += strlen(aux);
+                memcpy(responseptr, " ", 1);
+                responseptr += 1;
+
+                write(1, "checkpoint 6\n", 13);
+
+                // Opens image file
+                if ((fd = open(path_aux, O_RDONLY)) < 0)
+                    return -1;
+
+                read_full(fd, &responseptr, aisize);
+
+                if (close(fd) < 0)
+                    return -1;
+
+                write(1, "checkpoint 7\n", 13);
+            }
+            else
+            {
+                memcpy(responseptr, "0", 1);
+                responseptr += 1;
+            }
+        }
+        memcpy(responseptr, "\n", 1);
+        responseptr += 1;
+        write(1, "checkpoint 8\n", 13);
+        write_full(connfd, response, (long)(responseptr - response + 1));
+        free(response);
         return 0;
+
     }
     else if (!strcmp(request, "QUS"))
     {
@@ -279,7 +643,7 @@ int receivetcp(int connfd, char *buffer, struct sockaddr_in *cliaddr, socklen_t 
         if (strlen(topic) > 10 || !isAlphanumeric(topic))
         {
             printf("invalid\n");
-            write_full(connfd, "QUR NOK\n");
+            write_full(connfd, "QUR NOK\n", strlen("QUR NOK\n"));
             return 0;
         }
 
@@ -320,13 +684,13 @@ int receivetcp(int connfd, char *buffer, struct sockaddr_in *cliaddr, socklen_t 
         if (question_count >= 99)
         {
             printf("full\n");
-            write_full(connfd, "QUR FUL\n");
+            write_full(connfd, "QUR FUL\n", strlen("QUR FUL\n"));
             return 0;
         }
         else if (duplicate_question)
         {
             printf("duplicate\n");
-            write_full(connfd, "QUR DUP\n");
+            write_full(connfd, "QUR DUP\n", strlen("QUR DUP\n"));
             return 0;
         }
         closedir(dir);
@@ -438,13 +802,13 @@ int receivetcp(int connfd, char *buffer, struct sockaddr_in *cliaddr, socklen_t 
             if (*bufferptr == '\n')
             {
                 printf("success\n");
-                write_full(connfd, "QUR OK\n");
+                write_full(connfd, "QUR OK\n", strlen("QUR OK\n"));
                 return 0;
             }
             else
             {
                 printf("failure\n");
-                write_full(connfd, "QUR NOK\n");
+                write_full(connfd, "QUR NOK\n", strlen("QUR NOK\n"));
                 return 0;
             }
         }
@@ -455,20 +819,20 @@ int receivetcp(int connfd, char *buffer, struct sockaddr_in *cliaddr, socklen_t 
             if (*bufferptr == '\n')
             {
                 printf("success\n");
-                write_full(connfd, "QUR OK\n");
+                write_full(connfd, "QUR OK\n", strlen("QUR OK\n"));
                 return 0;
             }
             else
             {
                 printf("failure\n");
-                write_full(connfd, "QUR NOK\n");
+                write_full(connfd, "QUR NOK\n", strlen("QUR NOK\n"));
                 return 0;
             }
         }
         else
         {
             printf("failure\n");
-            write_full(connfd, "QUR NOK\n");
+            write_full(connfd, "QUR NOK\n", strlen("QUR NOK\n"));
             return 0;
         }
     }
@@ -554,7 +918,7 @@ int receivetcp(int connfd, char *buffer, struct sockaddr_in *cliaddr, socklen_t 
 
         if (answer_count >= 99)
         {
-            write_full(connfd, "ANR FUL\n");
+            write_full(connfd, "ANR FUL\n", strlen("ANR FUL\n"));
             return 0;
         }
         else
@@ -640,7 +1004,6 @@ int receivetcp(int connfd, char *buffer, struct sockaddr_in *cliaddr, socklen_t 
             else
                 sprintf(answer_name, "0%d_%d.%s", answer_count, auserid, iext);
             strcat(path_aux, answer_name);
-            
 
             if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0666)) < 0)
                 return -1;
@@ -667,13 +1030,13 @@ int receivetcp(int connfd, char *buffer, struct sockaddr_in *cliaddr, socklen_t 
             if (*bufferptr == '\n')
             {
                 printf("success\n");
-                write_full(connfd, "ANR OK\n");
+                write_full(connfd, "ANR OK\n", strlen("ANR OK\n"));
                 return 0;
             }
             else
             {
                 printf("failure\n");
-                write_full(connfd, "ANR NOK\n");
+                write_full(connfd, "ANR NOK\n", strlen("ANR NOK\n"));
                 return 0;
             }
         }
@@ -684,27 +1047,27 @@ int receivetcp(int connfd, char *buffer, struct sockaddr_in *cliaddr, socklen_t 
             if (*bufferptr == '\n')
             {
                 printf("success\n");
-                write_full(connfd, "ANR OK\n");
+                write_full(connfd, "ANR OK\n", strlen("ANR OK\n"));
                 return 0;
             }
             else
             {
                 printf("failure\n");
-                write_full(connfd, "ANR NOK\n");
+                write_full(connfd, "ANR NOK\n", strlen("ANR NOK\n"));
                 return 0;
             }
         }
         else
         {
             printf("failure\n");
-            write_full(connfd, "ANR NOK\n");
+            write_full(connfd, "ANR NOK\n", strlen("ANR NOK\n"));
             return 0;
         }
     }
     else
     {
         printf("Unexpected protocol message received\n");
-        write_full(connfd, "ERR\n");
+        write_full(connfd, "ERR\n", strlen("ERR\n"));
         return 0;
     }
 }
@@ -820,7 +1183,10 @@ int main(int argc, char **argv)
                 if (receivetcp(connfd, tcpbuffer, &cliaddr, &len) == -1)
                     exit(1);
                 else
+                {
+                    free(tcpbuffer);
                     exit(0);
+                }
             }
             else if (childpid == -1)
                 exit(1);
