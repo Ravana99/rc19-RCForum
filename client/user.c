@@ -91,33 +91,33 @@ int sendUDP(int udpfd, struct addrinfo **resudp, char *message, char *response)
     return n;
 }
 
-void sendTCP(int tcpfd, struct addrinfo *restcp, char *message, char *response, int message_length)
+void sendTCP(struct addrinfo *restcp, char *message, char *response, int message_length)
 {
     ssize_t nbytes = message_length * sizeof(char), nleft, nwritten, nread;
-    char *ptr;
-    int FD;
+    char *ptr, answer[2048];
+    int tcpfd;
 
-    if ((FD = socket(restcp->ai_family, restcp->ai_socktype, restcp->ai_protocol)) == -1)
+    if ((tcpfd = socket(restcp->ai_family, restcp->ai_socktype, restcp->ai_protocol)) == -1)
     {
         printf("Socket error\n");
         exit(EXIT_FAILURE);
     }
-    if (connect(FD, restcp->ai_addr, restcp->ai_addrlen) == -1)
+    if (connect(tcpfd, restcp->ai_addr, restcp->ai_addrlen) == -1)
     {
         printf("Connection error\n");
         exit(1);
     }
 
     nleft = nbytes;
-    printf("nbytes %zu\n%s\nresponse %s\n", nbytes, message, response);
+    //printf("nbytes %zu\n%s\nresponse %s\n", nbytes, message, response);
     ptr = message;
     while (nleft > 0)
     {
         write(1, "1\n", 2);
-        if ((nwritten = write(FD, ptr, nleft)) <= 0)
+        if ((nwritten = write(tcpfd, ptr, nleft)) <= 0)
         {
             write(1, "WERROR\n", 7);
-            printf("%s", strerror(errno));
+            printf("%s\n", strerror(errno));
             exit(EXIT_FAILURE);
         }
 
@@ -128,17 +128,17 @@ void sendTCP(int tcpfd, struct addrinfo *restcp, char *message, char *response, 
     // nleft = nbytes;
     do
     {
-        if ((nread = read(FD, ptr, 1)) <= 0)
+        if ((nread = read(tcpfd, ptr, 1)) <= 0)
         {
-            write(1, "WERROR\n", 7);
+            write(1, "RERROR\n", 7);
             exit(EXIT_FAILURE);
         }
         ptr += nread;
     } while (*(ptr - nread) != '\n');
 
     //nread = nbytes - nleft;
-    printf("nbytes %zu\n%s\nresponse %s\n", nbytes, message, response);
-    close(FD);
+    printf("nbytes %zu\n%s\n\n", nbytes, message);
+    close(tcpfd);
     //return response
 }
 
@@ -263,7 +263,7 @@ void questionList(char *message, char *response, int udpfd, struct addrinfo *res
         }
     }
 }
-void questionGet(char *message, char *response, int tcpfd, struct addrinfo *restcp, int active_topic_number, Topic *topic_list, bool selectByNumber)
+void questionGet(char *message, char *response, struct addrinfo *restcp, int active_topic_number, Topic *topic_list, bool selectByNumber)
 {
     /*if (selectByNumber)
     { 
@@ -293,7 +293,7 @@ void questionGet(char *message, char *response, int tcpfd, struct addrinfo *rest
             printf("Invalid topic name\n\n");
     }*/
 }
-void questionSubmit(char *inputptr, char *message, char *response, int tcpfd, struct addrinfo *restcp, int userid, int active_topic_number, Topic *topic_list)
+void questionSubmit(char *inputptr, char *message, char *response, struct addrinfo *restcp, int userid, int active_topic_number, Topic *topic_list)
 {
     FILE *fp;
     int i, message_length;
@@ -356,30 +356,19 @@ void questionSubmit(char *inputptr, char *message, char *response, int tcpfd, st
         message_length += 11;
         sprintf(message, "QUS %d %s %s %ld %s 0\n", userid, topic_list[active_topic_number].name, question, qsize, qdata);
     }
-    sendTCP(tcpfd, restcp, message, response, message_length);
-    printf("%s\n\n", response);
-    nbytes = 7;
-
-    nleft = nbytes;
-    while (nleft > 0)
-    {
-        if ((nwritten = write(tcpfd, ptr, nleft)) <= 0)
-            break;
-        nleft -= nwritten;
-        ptr += nwritten;
-    }
+    sendTCP(restcp, message, response, message_length);
+    printf("RESPONSE %s\n\n", response);
     //free(idata);
 }
 void answerSubmit()
 {
 }
-void quit(struct addrinfo *restcp, struct addrinfo *resudp, int udpfd, int tcpfd, char *message)
+void quit(struct addrinfo *restcp, struct addrinfo *resudp, int udpfd, char *message)
 {
     free(message);
     freeaddrinfo(restcp);
     freeaddrinfo(resudp);
     close(udpfd);
-    // close(tcpfd);
     exit(EXIT_SUCCESS);
 }
 
@@ -389,7 +378,7 @@ int main(int argc, char **argv)
     struct addrinfo hintstcp, hintsudp, *restcp, *resudp;
     ssize_t n, nbytes, nleft, nwritten, nread;
 
-    int tcpfd, udpfd, errcode, active_topic_number = 0, number_of_topics = 0, userid = 0;
+    int udpfd, errcode, active_topic_number = 0, number_of_topics = 0, userid = 0;
     struct sigaction act;
 
     char port[16], hostname[128], buffer[128], input[128], command[128], response[2048], active_question[11];
@@ -435,7 +424,7 @@ int main(int argc, char **argv)
         inputptr += strlen(command) + 1; // Points to arguments of the command
 
         if (!strcmp(command, "exit"))
-            quit(restcp, resudp, udpfd, tcpfd, message);
+            quit(restcp, resudp, udpfd, message);
         else if (!strcmp(command, "register") || !strcmp(command, "reg"))
             registerUser(&userid, inputptr, message, response, udpfd, resudp);
 
@@ -456,12 +445,12 @@ int main(int argc, char **argv)
                          active_topic_number, number_of_topics, topic_list);
 
         else if (!strcmp(command, "question_get"))
-            questionGet(message, response, tcpfd, restcp, active_topic_number, topic_list, false);
+            questionGet(message, response, restcp, active_topic_number, topic_list, false);
         else if (!strcmp(command, "qg"))
-            questionGet(message, response, tcpfd, restcp, active_topic_number, topic_list, true);
+           questionGet(message, response, restcp, active_topic_number, topic_list, true);
 
         else if (!strcmp(command, "question_submit") || !strcmp(command, "qs"))
-            questionSubmit(inputptr, message, response, tcpfd, restcp, userid, active_topic_number, topic_list);
+            questionSubmit(inputptr, message, response, restcp, userid, active_topic_number, topic_list);
 
         else if (!strcmp(command, "answer_submit") || !strcmp(command, "as"))
             answerSubmit();
