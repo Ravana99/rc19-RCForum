@@ -91,34 +91,54 @@ int sendUDP(int udpfd, struct addrinfo **resudp, char *message, char *response)
     return n;
 }
 
-void sendTCP(int tcpfd, char *message, char *response)
+void sendTCP(int tcpfd, struct addrinfo *restcp, char *message, char *response, int message_length)
 {
-    ssize_t nbytes = strlen(message), nleft, nwritten, nread;
+    ssize_t nbytes = message_length * sizeof(char), nleft, nwritten, nread;
     char *ptr;
+    int FD;
+
+    if ((FD = socket(restcp->ai_family, restcp->ai_socktype, restcp->ai_protocol)) == -1)
+    {
+        printf("Socket error\n");
+        exit(EXIT_FAILURE);
+    }
+    if (connect(FD, restcp->ai_addr, restcp->ai_addrlen) == -1)
+    {
+        printf("Connection error\n");
+        exit(1);
+    }
+
     nleft = nbytes;
     printf("nbytes %zu\n%s\nresponse %s\n", nbytes, message, response);
     ptr = message;
     while (nleft > 0)
     {
-        if ((nwritten = write(tcpfd, ptr, nleft)) <= 0)
-            break;
+        write(1, "1\n", 2);
+        if ((nwritten = write(FD, ptr, nleft)) <= 0)
+        {
+            write(1, "WERROR\n", 7);
+            printf("%s", strerror(errno));
+            exit(EXIT_FAILURE);
+        }
+
         nleft -= nwritten;
         ptr += nwritten;
     }
     ptr = response;
-    nleft = nbytes;
-    while (nleft > 0)
+    // nleft = nbytes;
+    do
     {
-        if ((nread = read(tcpfd, response, nleft)) == -1)
-            break;
-        else if (nread == 0)
-            break;
-        printf("OI");
-        nleft -= nread;
+        if ((nread = read(FD, ptr, 1)) <= 0)
+        {
+            write(1, "WERROR\n", 7);
+            exit(EXIT_FAILURE);
+        }
         ptr += nread;
-    }
-    nread = nbytes - nleft;
+    } while (*(ptr - nread) != '\n');
+
+    //nread = nbytes - nleft;
     printf("nbytes %zu\n%s\nresponse %s\n", nbytes, message, response);
+    close(FD);
     //return response
 }
 
@@ -276,39 +296,31 @@ void questionGet(char *message, char *response, int tcpfd, struct addrinfo *rest
 void questionSubmit(char *inputptr, char *message, char *response, int tcpfd, struct addrinfo *restcp, int userid, int active_topic_number, Topic *topic_list)
 {
     FILE *fp;
-    int i;
-    char question[11], filename[NAME_MAX + 3], imagefilename[NAME_MAX + 3], *ptr, messageTMP[2048], qdata[2048], iext[4];
+    int i, message_length;
+    char question[11], filename[NAME_MAX + 3], imagefilename[NAME_MAX + 3], *ptr, messageTMP[2048], qdata[2048], *idata, iext[4];
     imagefilename[0] = '\0';
-    unsigned char *idata;
     sscanf(inputptr, "%s %s %s", question, filename, imagefilename);
     ssize_t qsize = 0, isize = 0, nbytes = 0, nleft = 0, nwritten = 0, nread = 0;
 
     sscanf(inputptr, "%s %s %s", question, filename, imagefilename);
     //printf("INPUT:%s\nNAMELIMIT:%d\nfilename:%s\nquestion:l%s\nimagefilename:%s\n", inputptr, NAME_MAX, filename, question, imagefilename);
+    strcat(filename, ".txt");
     fp = fopen(filename, "r");
+    message_length = sizeof(userid) + strlen(topic_list[active_topic_number].name) + 1 + strlen(question) + 1 + sizeof(qsize) + strlen(qdata) + 1;
     if (fp == NULL)
     {
         printf("Question File Not Found!\n\n");
         return;
     }
-    fread(qdata, 2048, 1, fp);
-    strtok(qdata, "\n");
     fseek(fp, 0L, SEEK_END);
     qsize = ftell(fp);
+    fseek(fp, 0L, SEEK_SET);
+    fread(qdata, sizeof(char) * qsize, 1, fp);
+    strtok(qdata, "\n");
     fclose(fp);
-
-    sprintf(message, "QUS %d", userid);
-    strcat(message, " ");
-    strcat(message, topic_list[active_topic_number].name);
-    //strcat(message, " ");
-    strcat(message, question);
-    //strcat(message, " ");
-    strcpy(messageTMP, message);
-    sprintf(message, "%s %ld", messageTMP, qsize);
-    strcat(message, " ");
-    strcat(message, qdata);
     if (imagefilename[0] != '\0')
     {
+        //printf("HERE File Not Found!\n\n");
         fp = fopen(imagefilename, "rb");
         if (fp == NULL)
         {
@@ -321,7 +333,9 @@ void questionSubmit(char *inputptr, char *message, char *response, int tcpfd, st
         fseek(fp, 0L, SEEK_END);
         isize = ftell(fp);
         fseek(fp, 0L, SEEK_SET);
-        idata = malloc(sizeof(char) * isize);
+        idata = malloc(sizeof(char) * (isize + 1));
+        message = realloc(message, sizeof(char) * isize + sizeof(char) * message_length + 15);
+        message_length += 15 + isize;
         fread(idata, sizeof(char) * isize, 1, fp);
         fclose(fp);
 
@@ -330,20 +344,19 @@ void questionSubmit(char *inputptr, char *message, char *response, int tcpfd, st
         fwrite(idata, sizeof(char) * isize, 1, fp);
         fclose(fp);
         */
-
-        message = malloc(sizeof(char) * 2048);
-        strcat(message, " 1 ");
-        strcat(message, iext);
-        strcpy(messageTMP, message);
-        sprintf(message, "%s %ld", messageTMP, isize);
-        strcat(message, " ");
-        strcat(message, idata);
+        /*for (int i = 1; i < 61; i++)
+        {
+            printf("%s\n", topic_list[i].name);
+        }*/
+        sprintf(message, "QUS %d %s %s %ld %s 1 %s %ld %s\n", userid, topic_list[active_topic_number].name, question, qsize, qdata, iext, isize, idata);
     }
     else
     {
-        strcat(message, " 0");
+        message = realloc(message, sizeof(char) * (message_length + 11));
+        message_length += 11;
+        sprintf(message, "QUS %d %s %s %ld %s 0\n", userid, topic_list[active_topic_number].name, question, qsize, qdata);
     }
-    sendTCP(tcpfd, message, response);
+    sendTCP(tcpfd, restcp, message, response, message_length);
     printf("%s\n\n", response);
     nbytes = 7;
 
@@ -360,12 +373,13 @@ void questionSubmit(char *inputptr, char *message, char *response, int tcpfd, st
 void answerSubmit()
 {
 }
-void quit(struct addrinfo *restcp, struct addrinfo *resudp, int udpfd, int tcpfd)
+void quit(struct addrinfo *restcp, struct addrinfo *resudp, int udpfd, int tcpfd, char *message)
 {
+    free(message);
     freeaddrinfo(restcp);
     freeaddrinfo(resudp);
     close(udpfd);
-    close(tcpfd);
+    // close(tcpfd);
     exit(EXIT_SUCCESS);
 }
 
@@ -380,9 +394,9 @@ int main(int argc, char **argv)
 
     char port[16], hostname[128], buffer[128], input[128], command[128], response[2048], active_question[11];
     char *inputptr, *ptr, *message;
-    message = malloc(sizeof(char) * 2048);
-    //memset(topic_list, 0, sizeof topic_list);
 
+    //memset(topic_list, 0, sizeof topic_list);
+    message = malloc(sizeof(char) * 2048);
     setHostNameAndPort(argc, argv, hostname, port);
 
     memset(&hintstcp, 0, sizeof hintstcp);
@@ -406,13 +420,12 @@ int main(int argc, char **argv)
     if (getaddrinfo(hostname, port, &hintsudp, &resudp) != 0)
         exit(EXIT_FAILURE);
 
-    if ((tcpfd = socket(restcp->ai_family, restcp->ai_socktype, restcp->ai_protocol)) == -1)
-        exit(EXIT_FAILURE);
     if ((udpfd = socket(resudp->ai_family, resudp->ai_socktype, resudp->ai_protocol)) == -1)
         exit(EXIT_FAILURE);
 
     while (1)
     {
+
         //printf("Number of topics %d\nActive Topic %s\nUserID %d\n", number_of_topics, topic_list[active_topic_number].name, userid);
         fgets(input, 2048, stdin);
         if (!strcmp(input, "\n"))
@@ -422,7 +435,7 @@ int main(int argc, char **argv)
         inputptr += strlen(command) + 1; // Points to arguments of the command
 
         if (!strcmp(command, "exit"))
-            quit(restcp, resudp, udpfd, tcpfd);
+            quit(restcp, resudp, udpfd, tcpfd, message);
         else if (!strcmp(command, "register") || !strcmp(command, "reg"))
             registerUser(&userid, inputptr, message, response, udpfd, resudp);
 
@@ -456,7 +469,8 @@ int main(int argc, char **argv)
         else
             printf("Unknown command\n\n");
 
-        memset(message, 0, sizeof(char) * 2048);
+        free(message);
+        message = malloc(sizeof(char) * 2048);
         memset(response, 0, sizeof(char) * 2048);
         memset(buffer, 0, sizeof buffer);
         memset(input, 0, sizeof input);
