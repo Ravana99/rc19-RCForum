@@ -29,6 +29,20 @@ int isAlphanumeric(char *str)
     return 1;
 }
 
+void readUntil(int fd, char **bufferptr, int amount, char token)
+{
+    int i, n;
+    for (i = 0; i < amount; i++)
+    {
+        do
+        { // Reads until '\n'
+            if ((n = read(fd, *bufferptr, 1)) <= 0)
+                exit(1);
+            *bufferptr += n;
+        } while (*(*bufferptr - n) != token);
+    }
+}
+
 void read_full(int fd, char **responseptr, long n)
 {
     int nr;
@@ -73,14 +87,79 @@ void setPort(int argc, char **argv, char *port)
     }
 }
 
-void getTopic()
+// Checks if a topic exists and gives its path (if pathname isn't NULL)
+int findTopic(char *topic, char *pathname)
 {
+    DIR *dir;
+    struct dirent *entry;
+    char delim[2] = "_", topic_name[32], topic_folder[32];
 
+    if ((dir = opendir("server/topics")) == NULL)
+        exit(1);
+    readdir(dir); // Skips directory .
+    readdir(dir); // Skips directory ..
+    while ((entry = readdir(dir)) != NULL)
+    {
+        strcpy(topic_folder, entry->d_name);
+        strtok(entry->d_name, delim);
+        strcpy(topic_name, strtok(NULL, delim));
+        if (!strcmp(topic, topic_name))
+        {
+            if (pathname != NULL)
+                sprintf(pathname, "server/topics/%s", topic_folder);
+            closedir(dir);
+            return 1;
+        }
+    }
+    closedir(dir);
+    return 0;
 }
 
-void getQuestion()
+int findQuestion(char *question, char *pathname, int *id)
 {
-    
+    DIR *dir;
+    struct dirent *entry;
+    char delim[2] = "_", question_name[32], question_folder[32], quserid[8];
+
+    if ((dir = opendir(pathname)) == NULL)
+        exit(1);
+    readdir(dir); // Skips directory .
+    readdir(dir); // Skips directory ..
+    while ((entry = readdir(dir)) != NULL)
+    {
+        strcpy(question_folder, entry->d_name);
+        strtok(entry->d_name, delim);
+        strcpy(question_name, strtok(NULL, delim));
+        strcpy(quserid, strtok(NULL, delim)); // Gets user ID
+        if (!strcmp(question_name, question))
+        {
+            strcat(pathname, "/");
+            strcat(pathname, question_folder);
+            *id = atoi(quserid);
+            return 1;
+        }
+    }
+    closedir(dir);
+    return 0;
+}
+
+// Returns number of answers in a question given a question path
+int getAnswerCount(char *pathname)
+{
+    FILE *fp;
+    int answer_count;
+    char answer_path[128];
+
+    strcpy(answer_path, pathname);
+    strcat(answer_path, "/anscount.txt");
+
+    if ((fp = fopen(answer_path, "r")) == NULL)
+        exit(1);
+
+    fscanf(fp, "%d\n", &answer_count);
+    fclose(fp);
+
+    return answer_count;
 }
 
 // ------ COMMANDS ------ //
@@ -112,6 +191,7 @@ int topic_list(char *response)
     printf("User is listing the available topics\n");
     sprintf(response, "LTR %d", topic_amount);
 
+    // Lists every directory
     if ((dir = opendir("server/topics")) == NULL)
         return -1;
     readdir(dir); // Skips directory .
@@ -132,11 +212,8 @@ int topic_list(char *response)
 
 int topic_propose(char *buffer, int *id, char *response)
 {
-    DIR *dir;
-    struct dirent *entry;
-    char topic_name[128], existing_topic[16], pathname[128];
-    int duplicate_topic = 0;
-    char delim[2] = "_";
+    char topic_name[128], pathname[128];
+
     sscanf(buffer, "PTP %d %s", id, topic_name);
 
     printf("User %d is proposing topic %s... ", *id, topic_name);
@@ -148,30 +225,15 @@ int topic_propose(char *buffer, int *id, char *response)
     }
     else
     {
-
-        if ((dir = opendir("server/topics")) == NULL)
-            return -1;
-        readdir(dir); // Skips directory .
-        readdir(dir); // Skips directory ..
-        while ((entry = readdir(dir)) != NULL)
-        {
-            strtok(entry->d_name, delim);
-            strcpy(existing_topic, strtok(NULL, delim));
-            if (!strcmp(existing_topic, topic_name))
-            {
-                duplicate_topic = 1;
-                break;
-            }
-        }
-        if (topic_amount >= 99)
-        {
-            printf("full\n");
-            strcpy(response, "PTR FUL\n");
-        }
-        else if (duplicate_topic)
+        if (findTopic(topic_name, NULL)) // Checks if topic already exists
         {
             printf("duplicate\n");
             strcpy(response, "PTR DUP\n");
+        }
+        else if (topic_amount >= 99) // Checks if the maximum number of topics has been reached
+        {
+            printf("full\n");
+            strcpy(response, "PTR FUL\n");
         }
         else
         {
@@ -186,40 +248,25 @@ int topic_propose(char *buffer, int *id, char *response)
                 return -1;
             strcpy(response, "PTR OK\n");
         }
-        closedir(dir);
     }
     return 0;
 }
 
 int question_list(char *buffer, char *response)
 {
-    FILE *file;
     DIR *dir;
     struct dirent *entry;
-    char topic_buffer[128], topic_cmp[16], topic_folder[32], topic_name[16], pathname[512], answer_path[512], question_name[16], question_id[16];
+    char topic_buffer[128], topic_name[16], pathname[128], question_name[16], question_id[16], question_path[512];
     char delim[2] = "_";
     int question_amount = 0, answer_amount = 0;
 
     sscanf(buffer, "LQU %s", topic_name);
 
     printf("User is listing the available questions for the topic %s\n", topic_name);
-    if ((dir = opendir("server/topics")) == NULL)
-        return -1;
-    readdir(dir); // Skips directory .
-    readdir(dir); // Skips directory ..
-    while ((entry = readdir(dir)) != NULL)
-    {
-        strcpy(topic_folder, entry->d_name);
-        strtok(entry->d_name, delim);
-        strcpy(topic_cmp, strtok(NULL, delim));
-        if (!strcmp(topic_cmp, topic_name))
-        {
-            sprintf(pathname, "server/topics/%s", topic_folder);
-            break;
-        }
-    }
-    closedir(dir);
 
+    findTopic(topic_name, pathname);
+
+    // Counts number of questions in a topic
     if ((dir = opendir(pathname)) == NULL)
         return -1;
     readdir(dir); // Skips directory .
@@ -229,16 +276,17 @@ int question_list(char *buffer, char *response)
     closedir(dir);
     sprintf(response, "LQR %d", question_amount);
 
+    // Lists all the questions in a topic
     if ((dir = opendir(pathname)) == NULL)
         return -1;
     readdir(dir); // Skips directory .
     readdir(dir); // Skips directory ..
     while ((entry = readdir(dir)) != NULL)
     {
-        sprintf(answer_path, "%s/%s/anscount.txt", pathname, entry->d_name);
-        if ((file = fopen(answer_path, "r")) == NULL)
-            exit(1);
-        fscanf(file, "%d\n", &answer_amount);
+        strcpy(question_path, pathname);
+        strcat(question_path, "/");
+        strcat(question_path, entry->d_name);
+        answer_amount = getAnswerCount(question_path);
 
         strtok(entry->d_name, delim);
         strcpy(question_name, strtok(NULL, delim));
@@ -246,22 +294,20 @@ int question_list(char *buffer, char *response)
         sprintf(topic_buffer, " %s:%s:%d", question_name, question_id, answer_amount);
         strcat(response, topic_buffer);
     }
-    strcat(response, "\n");
-
     closedir(dir);
+    strcat(response, "\n");
     return 0;
 }
 
 int question_get(int connfd, char *buffer)
 {
-    char id[16], topic[16], question[16], pathname[128], topic_folder[32], question_folder[32], cmp[16], path_aux[128], ansf[4], img[16], iext[8], aux[64];
+    char id[16], topic[16], question[16], pathname[128], cmp[16], path_aux[128], ansf[4], img[16], iext[8], aux[64];
     char *response, *responseptr, *bufferptr;
-    int answer_count, fd, i, j, n, topic_found = 0, question_found = 0, img_found = 0, quserid = -1;
+    int answer_count, fd, i, j, img_found = 0, quserid = -1;
     long ressize = 2048, qsize, isize, realloc_aux;
     DIR *dir;
     FILE *fp;
     struct dirent *entry;
-    char delim[2] = "_";
 
     if ((response = (char *)malloc(2048 * sizeof(char))) == NULL)
         return -1;
@@ -269,12 +315,7 @@ int question_get(int connfd, char *buffer)
     responseptr = &response[0];
     bufferptr = &buffer[4];
 
-    do
-    { // Reads until '\n'
-        if ((n = read(connfd, bufferptr, 1)) <= 0)
-            return -1;
-        bufferptr += n;
-    } while (*(bufferptr - n) != '\n');
+    readUntil(connfd, &bufferptr, 1, '\n');
 
     if (sscanf(buffer, "GQU %s %s\n", topic, question) != 2)
     {
@@ -285,25 +326,8 @@ int question_get(int connfd, char *buffer)
     }
 
     // Opens topic folder
-    if ((dir = opendir("server/topics")) == NULL)
-        return -1;
-    readdir(dir); // Skips directory .
-    readdir(dir); // Skips directory ..
-    while ((entry = readdir(dir)) != NULL)
-    {
-        strcpy(topic_folder, entry->d_name);
-        strtok(entry->d_name, delim);
-        strcpy(cmp, strtok(NULL, delim));
-        if (!strcmp(cmp, topic))
-        {
-            sprintf(pathname, "server/topics/%s", topic_folder);
-            topic_found = 1;
-            break;
-        }
-    }
-    closedir(dir);
-
-    if (!topic_found)
+    strcpy(pathname, "server/topics");
+    if (!findTopic(topic, pathname))
     {
         write_full(connfd, "QGR EOF\n", strlen("QGR EOF\n"));
         free(response);
@@ -312,34 +336,15 @@ int question_get(int connfd, char *buffer)
     }
 
     // Opens question folder
-    if ((dir = opendir(pathname)) == NULL)
-        return -1;
-    readdir(dir); // Skips directory .
-    readdir(dir); // Skips directory ..
-    while ((entry = readdir(dir)) != NULL)
-    {
-        strcpy(question_folder, entry->d_name);
-        strtok(entry->d_name, delim);
-        strcpy(cmp, strtok(NULL, delim));
-        strcpy(id, strtok(NULL, delim)); // Gets user ID
-        if (!strcmp(cmp, question))
-        {
-            question_found = 1;
-            strcat(pathname, "/");
-            strcat(pathname, question_folder);
-            quserid = atoi(id);
-            break;
-        }
-    }
-    closedir(dir);
-
-    if (!question_found)
+    if (!findQuestion(question, pathname, &quserid))
     {
         write_full(connfd, "QGR EOF\n", strlen("QGR EOF\n"));
         free(response);
         free(buffer);
         return 0;
     }
+
+    /* VOU AQUI */
 
     // Checking number of answers
     strcpy(path_aux, pathname);
