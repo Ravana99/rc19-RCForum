@@ -1,5 +1,3 @@
-• Tiny verifications in server (e.g. number of digits in field size <= 10)
-
 • Timeout for UDP requests - no idea how to do, ask teacher Thursday
 
 Not planning on doing this for the server (too time-consuming, not really worth it) but we should still make sure the user downloads files with question_get with this format:

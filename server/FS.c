@@ -17,9 +17,17 @@
 #include <fcntl.h>
 
 #define max(A, B) ((A) >= (B) ? (A) : (B))
+#define BUFF_MAX 2048
+#define P_MAX 512
+#define F_MAX 64
+#define ID_MAX 8
+#define EXT_MAX 8
 
 int topic_amount = 0;
 
+// ------ AUXILIARY FUNCTIONS ------ //
+
+// Checks if string is made up of only alphanumeric characters
 int isAlphanumeric(char *str)
 {
     int i;
@@ -29,21 +37,49 @@ int isAlphanumeric(char *str)
     return 1;
 }
 
-void readUntil(int fd, char **bufferptr, int amount, char token)
+int getNumberOfDigits(long n)
 {
-    int i, n;
-    for (i = 0; i < amount; i++)
+    int count = 0;
+    while (n != 0) {
+        n /= 10;
+        count++;
+    }
+    return count;
+}
+
+void reallocate(long *size, long inc, char **str, char **ptr)
+{
+    long aux;
+    *size += inc;
+    aux = *ptr - *str;
+    if ((*str = (char *)realloc(*str, *size * sizeof(char))) == NULL)
+        exit(1);
+    *ptr = *str + aux;
+}
+
+void appendString(char **ptr, char *str, int n)
+{
+    memcpy(*ptr, str, n);
+    *ptr += n;
+}
+
+// Reads bytes from fd, 1 by 1, until it reaches the character 'token' for the nth time
+void readUntil(int fd, char **bufferptr, int n, char token)
+{
+    int i, nr;
+    for (i = 0; i < n; i++)
     {
         do
         { // Reads until '\n'
-            if ((n = read(fd, *bufferptr, 1)) <= 0)
+            if ((nr = read(fd, *bufferptr, 1)) <= 0)
                 exit(1);
-            *bufferptr += n;
-        } while (*(*bufferptr - n) != token);
+            *bufferptr += nr;
+        } while (*(*bufferptr - nr) != token);
     }
 }
 
-void read_full(int fd, char **ptr, long n)
+// Reads n bytes from fd, in chunks as large as the system can
+void readFull(int fd, char **ptr, long n)
 {
     int nr;
     while (n > 0)
@@ -55,10 +91,11 @@ void read_full(int fd, char **ptr, long n)
     }
 }
 
-void write_full(int fd, char *string, long n)
+// Writes n bytes from fd, in chunks as large as the system can
+void writeFull(int fd, char *str, long n)
 {
     int nw;
-    char *ptr = &string[0];
+    char *ptr = &str[0];
     while (n > 0)
     {
         if ((nw = write(fd, ptr, n)) <= 0)
@@ -68,6 +105,7 @@ void write_full(int fd, char *string, long n)
     }
 }
 
+// Reads command line arguments and sets the port number accordingly
 void setPort(int argc, char **argv, char *port)
 {
     if (argc == 3)
@@ -85,14 +123,16 @@ void setPort(int argc, char **argv, char *port)
         printf("Invalid command line arguments\n");
         exit(1);
     }
+    else
+        strcpy(port, "58039");
 }
 
-// Checks if a topic exists and gives its path (if pathname isn't NULL)
+// Checks if a topic exists and saves its path (if pathname isn't NULL)
 int findTopic(char *topic, char *pathname)
 {
     DIR *dir;
     struct dirent *entry;
-    char delim[2] = "_", topic_name[32], topic_folder[32];
+    char delim[2] = "_", topic_name[F_MAX], topic_folder[F_MAX];
 
     if ((dir = opendir("server/topics")) == NULL)
         exit(1);
@@ -115,12 +155,13 @@ int findTopic(char *topic, char *pathname)
     return 0;
 }
 
-// Finds a question in a certain topic and saves the ID of the submitter if id != NULL
+// Finds a question folder in a certain topic, saves its path and
+// saves the ID of the submitter (if id isn't NULL)
 int findQuestion(char *question, char *pathname, int *id)
 {
     DIR *dir;
     struct dirent *entry;
-    char delim[2] = "_", question_name[32], question_folder[32], quserid[8];
+    char delim[2] = "_", question_name[F_MAX], question_folder[F_MAX], quserid[ID_MAX];
 
     if ((dir = opendir(pathname)) == NULL)
         exit(1);
@@ -131,7 +172,7 @@ int findQuestion(char *question, char *pathname, int *id)
         strcpy(question_folder, entry->d_name);
         strtok(entry->d_name, delim);
         strcpy(question_name, strtok(NULL, delim));
-        strcpy(quserid, strtok(NULL, delim)); // Gets user ID
+        strcpy(quserid, strtok(NULL, delim));
         if (!strcmp(question_name, question))
         {
             strcat(pathname, "/");
@@ -146,11 +187,13 @@ int findQuestion(char *question, char *pathname, int *id)
     return 0;
 }
 
+// Finds the image associated with a certain question
+// (if there is one) and saves its extension
 int findQImg(char *pathname, char *ext)
 {
     DIR *dir;
     struct dirent *entry;
-    char img[32], delim[2] = ".";
+    char img_name[F_MAX], delim[2] = ".";
 
     if ((dir = opendir(pathname)) == NULL)
         exit(1);
@@ -158,9 +201,9 @@ int findQImg(char *pathname, char *ext)
     readdir(dir); // Skips directory ..
     while ((entry = readdir(dir)) != NULL)
     {
-        strcpy(img, entry->d_name);
-        strtok(img, delim);
-        if (!strcmp(img, "qimg"))
+        strcpy(img_name, entry->d_name);
+        strtok(img_name, delim);
+        if (!strcmp(img_name, "qimg"))
         {
             strcpy(ext, strtok(NULL, delim));
             closedir(dir);
@@ -171,19 +214,20 @@ int findQImg(char *pathname, char *ext)
     return 0;
 }
 
+// Finds a certain answer text file and saves the id of the submitter
 int findAnswer(char *pathname, char *answer, int *id, int i)
 {
     DIR *dir;
     struct dirent *entry;
-    char i_txt[4], delim[3] = "_.", aux[4], aid[16];
+    char i_str[4], delim[3] = "_.", aux[4], aid[ID_MAX];
 
     if (i < 10)
-        sprintf(i_txt, "0%d", i);
+        sprintf(i_str, "0%d", i);
     else
-        sprintf(i_txt, "%d", i);
+        sprintf(i_str, "%d", i);
 
     if ((dir = opendir(pathname)) == NULL)
-        return -1;
+        exit(1);
     readdir(dir); // Skips directory .
     readdir(dir); // Skips directory ..
     while ((entry = readdir(dir)) != NULL)
@@ -191,7 +235,7 @@ int findAnswer(char *pathname, char *answer, int *id, int i)
         strcpy(answer, entry->d_name);
         strcpy(aux, strtok(entry->d_name, delim));
         strcpy(aid, strtok(NULL, delim)); // Gets user ID
-        if (!strcmp(i_txt, aux))
+        if (!strcmp(i_str, aux))
         {
             strtok(answer, ".");
             *id = atoi(aid);
@@ -203,19 +247,16 @@ int findAnswer(char *pathname, char *answer, int *id, int i)
     return 0;
 }
 
-int findAImg(char *pathname, char *answer, char *aiext, int i)
+// Finds the image associated with a certain answer
+// (if there is one) and saves its extension
+int findAImg(char *pathname, char *answer, char *aiext)
 {
     DIR *dir;
     struct dirent *entry;
-    char delim[2] = ".", i_txt[4], aux[16];
-
-    if (i < 10)
-        sprintf(i_txt, "0%d", i);
-    else
-        sprintf(i_txt, "%d", i);
+    char delim[2] = ".", aux[16];
 
     if ((dir = opendir(pathname)) == NULL)
-        return -1;
+        exit(1);
     readdir(dir); // Skips directory .
     readdir(dir); // Skips directory ..
     while ((entry = readdir(dir)) != NULL)
@@ -234,7 +275,7 @@ int findAImg(char *pathname, char *answer, char *aiext, int i)
     return 0;
 }
 
-// Returns number of questions in a topic or -1 if it finds a duplicate
+// Returns number of questions in a given topic or -1 if it finds a duplicate
 int getQuestionCount(char *pathname, char *question)
 {
     DIR *dir;
@@ -258,6 +299,7 @@ int getQuestionCount(char *pathname, char *question)
         }
     }
     closedir(dir);
+
     return question_count;
 }
 
@@ -266,7 +308,7 @@ int getAnswerCount(char *pathname)
 {
     FILE *fp;
     int answer_count;
-    char answer_path[128];
+    char answer_path[P_MAX];
 
     strcpy(answer_path, pathname);
     strcat(answer_path, "/anscount.txt");
@@ -280,17 +322,18 @@ int getAnswerCount(char *pathname)
     return answer_count;
 }
 
-long getSizeOfFile(char *pathname, char *filename)
+// Returns the file size, in bytes, of a given file
+long getFileSize(char *pathname, char *filename)
 {
     FILE *fp;
     long size;
-    char path_aux[512];
+    char path_aux[P_MAX];
 
     strcpy(path_aux, pathname);
     strcat(path_aux, "/");
     strcat(path_aux, filename);
     if ((fp = fopen(path_aux, "r")) == NULL)
-        return -1;
+        exit(1);
     fseek(fp, 0L, SEEK_END);
     size = ftell(fp);
     fclose(fp);
@@ -300,7 +343,7 @@ long getSizeOfFile(char *pathname, char *filename)
 
 // ------ COMMANDS ------ //
 
-int register_user(char *buffer, int *id, char *response, struct sockaddr_in *cliaddr)
+int registerUser(char *buffer, int *id, char *response, struct sockaddr_in *cliaddr)
 {
     sscanf(buffer, "REG %d", id);
     printf("User %d (IP %s) trying to register... ", *id, inet_ntoa(cliaddr->sin_addr));
@@ -317,11 +360,11 @@ int register_user(char *buffer, int *id, char *response, struct sockaddr_in *cli
     return 0;
 }
 
-int topic_list(char *response)
+int topicList(char *response)
 {
     DIR *dir;
     struct dirent *entry;
-    char topic_buffer[128], topic_name[16], topic_id[16];
+    char topic_buffer[F_MAX], topic_name[F_MAX], topic_id[ID_MAX];
     char delim[2] = "_";
 
     printf("User is listing the available topics\n");
@@ -346,9 +389,9 @@ int topic_list(char *response)
     return 0;
 }
 
-int topic_propose(char *buffer, int *id, char *response)
+int topicPropose(char *buffer, int *id, char *response)
 {
-    char topic_name[128], pathname[128];
+    char topic_name[F_MAX], pathname[P_MAX];
 
     sscanf(buffer, "PTP %d %s", id, topic_name);
 
@@ -388,12 +431,12 @@ int topic_propose(char *buffer, int *id, char *response)
     return 0;
 }
 
-int question_list(char *buffer, char *response)
+int questionList(char *buffer, char *response)
 {
     DIR *dir;
     struct dirent *entry;
-    char topic_buffer[128], topic_name[16], pathname[128], question_name[16], question_id[16], question_path[512];
-    char delim[2] = "_";
+    char question_buffer[F_MAX], topic_name[F_MAX], pathname[P_MAX], question_name[F_MAX];
+    char question_id[ID_MAX], question_path[P_MAX], delim[2] = "_";
     int question_amount = 0, answer_amount = 0;
 
     sscanf(buffer, "LQU %s", topic_name);
@@ -427,36 +470,37 @@ int question_list(char *buffer, char *response)
         strtok(entry->d_name, delim);
         strcpy(question_name, strtok(NULL, delim));
         strcpy(question_id, strtok(NULL, delim));
-        sprintf(topic_buffer, " %s:%s:%d", question_name, question_id, answer_amount);
-        strcat(response, topic_buffer);
+        sprintf(question_buffer, " %s:%s:%d", question_name, question_id, answer_amount);
+        strcat(response, question_buffer);
     }
     closedir(dir);
     strcat(response, "\n");
     return 0;
 }
 
-int question_get(int connfd, char *buffer)
+int questionGet(int connfd, char *buffer)
 {
-    char topic[16], question[16], pathname[128], path_aux[128], img[16], iext[8], aux[64];
+    char topic[F_MAX], question[F_MAX], pathname[P_MAX], path_aux[P_MAX];
+    char img[F_MAX], iext[EXT_MAX], aux[64];
     char *response, *responseptr, *bufferptr;
     int answer_count, fd, i, j, quserid = -1;
-    long ressize = 2048, qsize, isize, realloc_aux;
-    FILE *fp;
+    long ressize = BUFF_MAX, qsize, isize;
 
-    if ((response = (char *)malloc(2048 * sizeof(char))) == NULL)
+    if ((response = (char *)malloc(ressize * sizeof(char))) == NULL)
         return -1;
 
     responseptr = &response[0];
-    bufferptr = &buffer[4];
+    bufferptr = &buffer[4]; // Skips command
 
     readUntil(connfd, &bufferptr, 1, '\n');
+    *bufferptr = '\0';
 
-    if (sscanf(buffer, "GQU %s %s\n", topic, question) != 2)
+    if (sscanf(buffer, "GQU %s %s\n", topic, question) != 2) // Message in the wrong format
     {
-        write_full(connfd, "QGR ERR\n", strlen("QGR ERR\n"));
-        printf("User is trying to get question... failure\n");
+        writeFull(connfd, "QGR ERR\n", strlen("QGR ERR\n"));
         free(response);
         free(buffer);
+        printf("User is trying to get question... failure\n");
         return 0;
     }
 
@@ -466,7 +510,7 @@ int question_get(int connfd, char *buffer)
     strcpy(pathname, "server/topics");
     if (!findTopic(topic, pathname))
     {
-        write_full(connfd, "QGR EOF\n", strlen("QGR EOF\n"));
+        writeFull(connfd, "QGR EOF\n", strlen("QGR EOF\n"));
         free(response);
         free(buffer);
         printf("not found\n");
@@ -476,244 +520,199 @@ int question_get(int connfd, char *buffer)
     // Opens question folder
     if (!findQuestion(question, pathname, &quserid))
     {
-        write_full(connfd, "QGR EOF\n", strlen("QGR EOF\n"));
+        writeFull(connfd, "QGR EOF\n", strlen("QGR EOF\n"));
         free(response);
         free(buffer);
         printf("not found\n");
         return 0;
     }
 
-    // Checking number of answers
     answer_count = getAnswerCount(pathname);
+    qsize = getFileSize(pathname, "qinfo.txt");
 
-    // Determining size of question file
-    qsize = getSizeOfFile(pathname, "qinfo.txt");
-
-    ressize += qsize;
-    realloc_aux = responseptr - response;
-    if ((response = (char *)realloc(response, ressize * sizeof(char))) == NULL)
-        return -1;
-    responseptr = response + realloc_aux;
+    reallocate(&ressize, qsize, &response, &responseptr);
 
     sprintf(response, "QGR %d %ld ", quserid, qsize);
     responseptr = response + strlen(response);
 
-    // Opens question text file
+    // Opens question text file and reads it
     strcpy(path_aux, pathname);
     strcat(path_aux, "/qinfo.txt");
     if ((fd = open(path_aux, O_RDONLY)) < 0)
         return -1;
-    read_full(fd, &responseptr, qsize);
+    readFull(fd, &responseptr, qsize);
     if (close(fd) < 0)
         return -1;
 
-    memcpy(responseptr, " ", 1);
-    responseptr++;
+    appendString(&responseptr, " ", 1);
 
     // Opens image file if one exists
     if (findQImg(pathname, iext))
     {
-        memcpy(responseptr, "1 ", 2);
-        responseptr += 2;
-        memcpy(responseptr, iext, 3);
-        responseptr += 3;
-        memcpy(responseptr, " ", 1);
-        responseptr += 1;
+        appendString(&responseptr, "1 ", 2);
+        appendString(&responseptr, iext, 3);
+        appendString(&responseptr, " ", 1);
 
         sprintf(img, "qimg.%s", iext);
-        isize = getSizeOfFile(pathname, img);
+        isize = getFileSize(pathname, img);
 
-        ressize += isize;
-        realloc_aux = responseptr - response;
-        if ((response = (char *)realloc(response, ressize * sizeof(char))) == NULL)
-            return -1;
-        responseptr = response + realloc_aux;
+        reallocate(&ressize, isize, &response, &responseptr);
 
         sprintf(aux, "%ld", isize);
-        memcpy(responseptr, aux, strlen(aux));
-        responseptr += strlen(aux);
-        memcpy(responseptr, " ", 1);
-        responseptr += 1;
+        appendString(&responseptr, aux, strlen(aux));
+        appendString(&responseptr, " ", 1);
 
-        // Opens image file
+        // Opens image file and reads it
         strcpy(path_aux, pathname);
         strcat(path_aux, "/");
         strcat(path_aux, img);
         if ((fd = open(path_aux, O_RDONLY)) < 0)
             return -1;
-        read_full(fd, &responseptr, isize);
+        readFull(fd, &responseptr, isize);
         if (close(fd) < 0)
             return -1;
 
-        memcpy(responseptr, " ", 1);
-        responseptr += 1;
+        appendString(&responseptr, " ", 1);
     }
     else
-    {
-        memcpy(responseptr, "0 ", 2);
-        responseptr += 2;
-    }
+        appendString(&responseptr, "0 ", 2);
+
     sprintf(aux, "%d", answer_count);
     if (answer_count >= 10)
-    {
-        memcpy(responseptr, "10", 2);
-        responseptr += 2;
-    }
+        appendString(&responseptr, "10", 2);
     else
-    {
-        memcpy(responseptr, aux, 1);
-        responseptr += 1;
-    }
+        appendString(&responseptr, aux, 1);
 
+    // Gets information of available answers
     for (i = answer_count, j = 0; i > 0 && j < 10; i--, j++)
     {
-
-        char aiext[8], answer[32];
+        char aiext[EXT_MAX], answer[F_MAX];
         long asize, aisize;
         int auserid;
 
-        // Opens question folder
         findAnswer(pathname, answer, &auserid, i);
 
-        // Determining size of answer text file
-        strcpy(path_aux, pathname);
-        strcat(path_aux, "/");
-        strcat(path_aux, answer);
-        strcat(path_aux, ".txt");
+        // Gets size of answer text file
+        strcpy(aux, answer);
+        strcat(aux, ".txt");
+        asize = getFileSize(pathname, aux);
 
-        if ((fp = fopen(path_aux, "r")) == NULL)
-            return -1;
-        fseek(fp, 0L, SEEK_END);
-        asize = ftell(fp);
-        fclose(fp);
-
-        ressize += asize;
-        realloc_aux = responseptr - response;
-        if ((response = (char *)realloc(response, ressize * sizeof(char))) == NULL)
-            return -1;
-        responseptr = response + realloc_aux;
+        reallocate(&ressize, asize, &response, &responseptr);
 
         if (i < 10)
             sprintf(aux, " 0%d %d %ld ", i, auserid, asize);
         else
             sprintf(aux, " %d %d %ld ", i, auserid, asize);
-        memcpy(responseptr, aux, strlen(aux));
-        responseptr += strlen(aux);
+        appendString(&responseptr, aux, strlen(aux));
 
-        // Opens answer text file
+        // Opens answer text file and reads it
+        strcpy(path_aux, pathname);
+        strcat(path_aux, "/");
+        strcat(path_aux, answer);
+        strcat(path_aux, ".txt");
         if ((fd = open(path_aux, O_RDONLY)) < 0)
             return -1;
-
-        read_full(fd, &responseptr, asize);
-
+        readFull(fd, &responseptr, asize);
         if (close(fd) < 0)
             return -1;
 
-        memcpy(responseptr, " ", 1);
-        responseptr++;
+        appendString(&responseptr, " ", 1);
 
         // Opens image file if one exists
-        if (findAImg(pathname, answer, aiext, i))
+        if (findAImg(pathname, answer, aiext))
         {
             char image_name[32];
 
-            memcpy(responseptr, "1 ", 2);
-            responseptr += 2;
-            memcpy(responseptr, aiext, 3);
-            responseptr += 3;
-            memcpy(responseptr, " ", 1);
-            responseptr += 1;
+            appendString(&responseptr, "1 ", 2);
+            appendString(&responseptr, aiext, 3);
+            appendString(&responseptr, " ", 1);
 
             strcpy(image_name, answer);
             strcat(image_name, ".");
             strcat(image_name, aiext);
 
-            aisize = getSizeOfFile(pathname, image_name);
+            aisize = getFileSize(pathname, image_name);
 
-            ressize += aisize;
-            realloc_aux = responseptr - response;
-            if ((response = (char *)realloc(response, ressize * sizeof(char))) == NULL)
-                return -1;
-            responseptr = response + realloc_aux;
+            reallocate(&ressize, aisize, &response, &responseptr);
 
             sprintf(aux, "%ld", aisize);
-            memcpy(responseptr, aux, strlen(aux));
-            responseptr += strlen(aux);
-            memcpy(responseptr, " ", 1);
-            responseptr += 1;
+            appendString(&responseptr, aux, strlen(aux));
+            appendString(&responseptr, " ", 1);
 
-            // Opens image file
+            // Opens image file and reads it
             strcpy(path_aux, pathname);
             strcat(path_aux, "/");
             strcat(path_aux, image_name);
             if ((fd = open(path_aux, O_RDONLY)) < 0)
                 return -1;
-            read_full(fd, &responseptr, aisize);
+            readFull(fd, &responseptr, aisize);
             if (close(fd) < 0)
                 return -1;
         }
         else
         {
-            memcpy(responseptr, "0", 1);
-            responseptr += 1;
+            appendString(&responseptr, "0", 1);
         }
     }
     memcpy(responseptr, "\n", 1);
-    responseptr += 1;
-    write_full(connfd, response, (long)(responseptr - response + 1));
+    writeFull(connfd, response, (long)(responseptr - response + 1));
     printf("success\n");
     free(response);
     free(buffer);
     return 0;
 }
 
-int question_submit(int connfd, char *buffer)
+int questionSubmit(int connfd, char *buffer)
 {
     int question_count, quserid, n, fd;
-    long qsize, realloc_aux, buffer_size = 2048;
+    long qsize, buffersize = BUFF_MAX;
     char *ptr, *bufferptr;
-    char topic[16], question[16], pathname[128], path_aux[128], question_folder[32];
+    char topic[F_MAX], question[F_MAX], pathname[P_MAX], path_aux[P_MAX], question_folder[F_MAX];
 
-    bufferptr = &buffer[4];
+    bufferptr = &buffer[4]; // Skips command
 
-    // Reads until 4th space (between qsize and qdata)
     readUntil(connfd, &bufferptr, 4, ' ');
 
-    // Scans command information
+    // Scans command info
+    *(bufferptr - 1) = '\0';
     sscanf(buffer, "QUS %d %s %s %ld", &quserid, topic, question, &qsize);
+    *(bufferptr - 1) = ' ';
 
-    realloc_aux = bufferptr - buffer;
-    if ((buffer = (char *)realloc(buffer, (buffer_size + qsize) * sizeof(char))) == NULL)
-        return -1;
-    bufferptr = buffer + realloc_aux;
-
-    printf("User %d is trying to submit question %s in topic %s... ", quserid, question, topic);
-
-    if (strlen(topic) > 10 || !isAlphanumeric(topic))
+    if (getNumberOfDigits(qsize) > 10)
     {
         printf("invalid\n");
-        write_full(connfd, "QUR NOK\n", strlen("QUR NOK\n"));
+        writeFull(connfd, "QUR NOK\n", strlen("QUR NOK\n"));
         free(buffer);
         return 0;
     }
 
-    // Opens topic folder
+    reallocate(&buffersize, qsize, &buffer, &bufferptr);
+
+    printf("User %d is trying to submit question %s in topic %s... ", quserid, question, topic);
+
+    if (strlen(question) > 10 || !isAlphanumeric(question))
+    {
+        printf("invalid\n");
+        writeFull(connfd, "QUR NOK\n", strlen("QUR NOK\n"));
+        free(buffer);
+        return 0;
+    }
+
     findTopic(topic, pathname);
 
-    // Counts number of questions in topic and checks for duplicate
     question_count = getQuestionCount(pathname, question);
 
     if (question_count >= 99)
     {
         printf("full\n");
-        write_full(connfd, "QUR FUL\n", strlen("QUR FUL\n"));
+        writeFull(connfd, "QUR FUL\n", strlen("QUR FUL\n"));
         free(buffer);
         return 0;
     }
     else if (question_count == -1) // Found a duplicate
     {
         printf("duplicate\n");
-        write_full(connfd, "QUR DUP\n", strlen("QUR DUP\n"));
+        writeFull(connfd, "QUR DUP\n", strlen("QUR DUP\n"));
         free(buffer);
         return 0;
     }
@@ -741,14 +740,14 @@ int question_submit(int connfd, char *buffer)
     if (close(fd) < 0)
         return -1;
 
-    // Creates question info file
+    // Creates question info file and writes the data it's reading from the buffer to the file
     strcpy(path_aux, pathname);
     strcat(path_aux, "/qinfo.txt");
     if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0666)) < 0)
         return -1;
     ptr = bufferptr;
-    read_full(connfd, &bufferptr, qsize);
-    write_full(fd, ptr, qsize);
+    readFull(connfd, &bufferptr, qsize);
+    writeFull(fd, ptr, qsize);
 
     if (close(fd) < 0)
         return -1;
@@ -766,64 +765,72 @@ int question_submit(int connfd, char *buffer)
     if (*(bufferptr - n) == '1') // Has image to read
     {
         char *ptr_aux = bufferptr;
-        char iext[4];
+        char iext[EXT_MAX];
         long isize;
 
         readUntil(connfd, &bufferptr, 3, ' ');
 
-        sscanf(ptr_aux, " %s %ld ", iext, &isize);
+        // Scans file info
+        *(bufferptr - 1) = '\0';
+        sscanf(ptr_aux, " %s %ld", iext, &isize);
+        *(bufferptr - 1) = ' ';
 
-        realloc_aux = bufferptr - buffer;
-        if ((buffer = (char *)realloc(buffer, (buffer_size + qsize + isize) * sizeof(char))) == NULL)
-            return -1;
-        bufferptr = buffer + realloc_aux;
+        if (getNumberOfDigits(isize) > 10 || strlen(iext) != 3)
+        {
+            printf("invalid\n");
+            writeFull(connfd, "QUR NOK\n", strlen("QUR NOK\n"));
+            free(buffer);
+            return 0;
+        }
 
+        reallocate(&buffersize, isize, &buffer, &bufferptr);
+
+        // Creates image file and writes the data it's reading from the buffer to the file
         strcpy(path_aux, pathname);
         strcat(path_aux, "/qimg.");
         strcat(path_aux, iext);
-
         if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0666)) < 0)
             return -1;
-
         ptr = bufferptr;
-        read_full(connfd, &bufferptr, isize);
-        write_full(fd, ptr, isize);
-
+        readFull(connfd, &bufferptr, isize);
+        writeFull(fd, ptr, isize);
         if (close(fd) < 0)
             return -1;
 
+        // Reads '\n'
         if ((n = read(connfd, bufferptr, 1)) <= 0)
             return -1;
         if (*bufferptr == '\n')
         {
             printf("success\n");
-            write_full(connfd, "QUR OK\n", strlen("QUR OK\n"));
+            writeFull(connfd, "QUR OK\n", strlen("QUR OK\n"));
             free(buffer);
             return 0;
         }
         else
         {
             printf("failure\n");
-            write_full(connfd, "QUR NOK\n", strlen("QUR NOK\n"));
+            writeFull(connfd, "QUR NOK\n", strlen("QUR NOK\n"));
             free(buffer);
             return 0;
         }
     }
     else if (*(bufferptr - n) == '0') // Has no image to read
     {
+        // Reads '\n'
         if ((n = read(connfd, bufferptr, 1)) <= 0)
             return -1;
         if (*bufferptr == '\n')
         {
             printf("success\n");
-            write_full(connfd, "QUR OK\n", strlen("QUR OK\n"));
+            writeFull(connfd, "QUR OK\n", strlen("QUR OK\n"));
             free(buffer);
             return 0;
         }
         else
         {
             printf("failure\n");
-            write_full(connfd, "QUR NOK\n", strlen("QUR NOK\n"));
+            writeFull(connfd, "QUR NOK\n", strlen("QUR NOK\n"));
             free(buffer);
             return 0;
         }
@@ -831,60 +838,60 @@ int question_submit(int connfd, char *buffer)
     else
     {
         printf("failure\n");
-        write_full(connfd, "QUR NOK\n", strlen("QUR NOK\n"));
+        writeFull(connfd, "QUR NOK\n", strlen("QUR NOK\n"));
         free(buffer);
         return 0;
     }
 }
 
-int answer_submit(int connfd, char *buffer)
+int answerSubmit(int connfd, char *buffer)
 {
     int answer_count = 0;
     int auserid, n, fd;
-    long asize, realloc_aux, buffer_size = 2048;
+    long asize, buffersize = BUFF_MAX;
     char *ptr, *bufferptr;
-    char topic[16], question[16], pathname[128], path_aux[128], ansf[4], answer_name[32];
+    char topic[F_MAX], question[F_MAX], pathname[P_MAX], path_aux[P_MAX], answer_name[F_MAX], anscount_str[4];
 
     bufferptr = &buffer[4];
 
     readUntil(connfd, &bufferptr, 4, ' ');
 
     // Scans command information
+    *(bufferptr - 1) = '\0';
     sscanf(buffer, "ANS %d %s %s %ld", &auserid, topic, question, &asize);
+    *(bufferptr - 1) = ' ';
+    if (getNumberOfDigits(asize) > 10)
+    {
+        printf("invalid\n");
+        writeFull(connfd, "QUR NOK\n", strlen("QUR NOK\n"));
+        free(buffer);
+        return 0;
+    }
 
-    realloc_aux = bufferptr - buffer;
-    if ((buffer = (char *)realloc(buffer, (buffer_size + asize) * sizeof(char))) == NULL)
-        return -1;
-    bufferptr = buffer + realloc_aux;
+    reallocate(&buffersize, asize, &buffer, &bufferptr);
 
     printf("User %d is trying to submit answer for question %s in topic %s... ", auserid, question, topic);
 
-    // Opens topic folder
     findTopic(topic, pathname);
-
-    // Opens question folder
     findQuestion(question, pathname, NULL);
-
-    // Checking number of answers
     answer_count = getAnswerCount(pathname);
 
     if (answer_count >= 99)
     {
-        write_full(connfd, "ANR FUL\n", strlen("ANR FUL\n"));
+        writeFull(connfd, "ANR FUL\n", strlen("ANR FUL\n"));
         free(buffer);
         return 0;
     }
     else
     {
+        // Updates answer count file
         strcpy(path_aux, pathname);
         strcat(path_aux, "/anscount.txt");
         if ((fd = open(path_aux, O_WRONLY | O_TRUNC)) < 0)
             return -1;
         answer_count++;
-        sprintf(ansf, "%d\n", answer_count);
-
-        write_full(fd, ansf, strlen(ansf));
-
+        sprintf(anscount_str, "%d\n", answer_count);
+        writeFull(fd, anscount_str, strlen(anscount_str));
         if (close(fd) < 0)
             return -1;
     }
@@ -897,14 +904,11 @@ int answer_submit(int connfd, char *buffer)
     else
         sprintf(answer_name, "0%d_%d.txt", answer_count, auserid);
     strcat(path_aux, answer_name);
-
     if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0666)) < 0)
         return -1;
-
     ptr = bufferptr;
-    read_full(connfd, &bufferptr, asize);
-    write_full(fd, ptr, asize);
-
+    readFull(connfd, &bufferptr, asize);
+    writeFull(fd, ptr, asize);
     if (close(fd) < 0)
         return -1;
 
@@ -920,19 +924,28 @@ int answer_submit(int connfd, char *buffer)
 
     if (*(bufferptr - n) == '1') // Has image to read
     {
-        char iext[4];
+        char iext[EXT_MAX];
         long isize;
 
         ptr = bufferptr;
         readUntil(connfd, &bufferptr, 3, ' ');
 
-        sscanf(ptr, " %s %ld ", iext, &isize);
+        // Scans file info
+        *(bufferptr - 1) = '\0';
+        sscanf(ptr, " %s %ld", iext, &isize);
+        *(bufferptr - 1) = ' ';
 
-        realloc_aux = bufferptr - buffer;
-        if ((buffer = (char *)realloc(buffer, (buffer_size + asize + isize) * sizeof(char))) == NULL)
-            return -1;
-        bufferptr = buffer + realloc_aux;
+        if (getNumberOfDigits(isize) > 10 || strlen(iext) != 3)
+        {
+            printf("invalid\n");
+            writeFull(connfd, "QUR NOK\n", strlen("QUR NOK\n"));
+            free(buffer);
+            return 0;
+        }
 
+        reallocate(&buffersize, isize, &buffer, &bufferptr);
+
+        // Creates image file and writes the data it's reading from the buffer to the file
         strcpy(path_aux, pathname);
         strcat(path_aux, "/");
         if (answer_count > 9)
@@ -940,49 +953,48 @@ int answer_submit(int connfd, char *buffer)
         else
             sprintf(answer_name, "0%d_%d.%s", answer_count, auserid, iext);
         strcat(path_aux, answer_name);
-
         if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0666)) < 0)
             return -1;
-
         ptr = bufferptr;
-        read_full(connfd, &bufferptr, isize);
-        write_full(fd, ptr, isize);
-
+        readFull(connfd, &bufferptr, isize);
+        writeFull(fd, ptr, isize);
         if (close(fd) < 0)
             return -1;
 
+        // Reads '\n'
         if ((n = read(connfd, bufferptr, 1)) <= 0)
             return -1;
         if (*bufferptr == '\n')
         {
             printf("success\n");
-            write_full(connfd, "ANR OK\n", strlen("ANR OK\n"));
+            writeFull(connfd, "ANR OK\n", strlen("ANR OK\n"));
             free(buffer);
             return 0;
         }
         else
         {
             printf("failure\n");
-            write_full(connfd, "ANR NOK\n", strlen("ANR NOK\n"));
+            writeFull(connfd, "ANR NOK\n", strlen("ANR NOK\n"));
             free(buffer);
             return 0;
         }
     }
     else if (*(bufferptr - n) == '0') // Has no image to read
     {
+        // Reads '\n'
         if ((n = read(connfd, bufferptr, 1)) <= 0)
             return -1;
         if (*bufferptr == '\n')
         {
             printf("success\n");
-            write_full(connfd, "ANR OK\n", strlen("ANR OK\n"));
+            writeFull(connfd, "ANR OK\n", strlen("ANR OK\n"));
             free(buffer);
             return 0;
         }
         else
         {
             printf("failure\n");
-            write_full(connfd, "ANR NOK\n", strlen("ANR NOK\n"));
+            writeFull(connfd, "ANR NOK\n", strlen("ANR NOK\n"));
             free(buffer);
             return 0;
         }
@@ -990,15 +1002,15 @@ int answer_submit(int connfd, char *buffer)
     else
     {
         printf("failure\n");
-        write_full(connfd, "ANR NOK\n", strlen("ANR NOK\n"));
+        writeFull(connfd, "ANR NOK\n", strlen("ANR NOK\n"));
         free(buffer);
         return 0;
     }
 }
 
-int receiveudp(int udpfd, char *buffer, struct sockaddr_in *cliaddr, socklen_t *len)
+int receiveUDP(int udpfd, char *buffer, struct sockaddr_in *cliaddr, socklen_t *len)
 {
-    char request[128], response[2048];
+    char request[8], response[BUFF_MAX];
     int id, n;
 
     if ((n = recvfrom(udpfd, buffer, 2048, 0, (struct sockaddr *)cliaddr, len)) == -1)
@@ -1006,63 +1018,65 @@ int receiveudp(int udpfd, char *buffer, struct sockaddr_in *cliaddr, socklen_t *
     buffer[n] = '\0'; // Appends a '\0' to the message so it can be used in strcmp
     sscanf(buffer, "%s", request);
 
-    //Register user
+    // register
     if (!strcmp(request, "REG"))
     {
-        if (register_user(buffer, &id, response, cliaddr) == -1)
+        if (registerUser(buffer, &id, response, cliaddr) == -1)
             exit(1);
     }
-    //List topics
+    // topic_list
     else if (!strcmp(request, "LTP"))
     {
-        if (topic_list(response) == -1)
+        if (topicList(response) == -1)
             exit(1);
     }
-    //Propose topics
+    // topic_propose
     else if (!strcmp(request, "PTP"))
     {
-        if (topic_propose(buffer, &id, response) == -1)
+        if (topicPropose(buffer, &id, response) == -1)
             exit(1);
     }
-    //List questions
+    // question_list
     else if (!strcmp(request, "LQU"))
     {
-        if (question_list(buffer, response) == -1)
+        if (questionList(buffer, response) == -1)
             exit(1);
     }
-    //Error
+    // error
     else
         strcpy(response, "ERR\n");
 
     return sendto(udpfd, response, strlen(response), 0, (struct sockaddr *)cliaddr, *len);
 }
 
-int receivetcp(int connfd, struct sockaddr_in *cliaddr, socklen_t *len)
+int receiveTCP(int connfd, struct sockaddr_in *cliaddr, socklen_t *len)
 {
-    char request[128];
+    char request[8];
     char *bufferptr, *buffer;
 
-    if ((buffer = (char *)malloc(2048 * sizeof(char))) == NULL)
+    if ((buffer = (char *)malloc(BUFF_MAX * sizeof(char))) == NULL)
         exit(1);
     bufferptr = &buffer[0];
 
     readUntil(connfd, &bufferptr, 1, ' ');
+    buffer[3] = '\0';
     sscanf(buffer, "%s ", request);
+    buffer[3] = ' ';
 
-    //Gets question
+    // question_get
     if (!strcmp(request, "GQU"))
-        return question_get(connfd, buffer);
-    //Submits question
+        return questionGet(connfd, buffer);
+    // question_submit
     else if (!strcmp(request, "QUS"))
-        return question_submit(connfd, buffer);
-    //Submits answer
+        return questionSubmit(connfd, buffer);
+    // answer_submit
     else if (!strcmp(request, "ANS"))
-        return answer_submit(connfd, buffer);
-    //Error
+        return answerSubmit(connfd, buffer);
+    // error
     else
     {
         printf("Unexpected protocol message received\n");
-        write_full(connfd, "ERR\n", strlen("ERR\n"));
+        writeFull(connfd, "ERR\n", strlen("ERR\n"));
         free(buffer);
         return 0;
     }
@@ -1071,7 +1085,7 @@ int receivetcp(int connfd, struct sockaddr_in *cliaddr, socklen_t *len)
 int main(int argc, char **argv)
 {
     int listenfd, connfd, udpfd, nready, maxfdp1, errcode;
-    char buffer[2048], port[16];
+    char buffer[BUFF_MAX], port[16];
     fd_set rset;
     struct sockaddr_in cliaddr;
     struct addrinfo hintstcp, hintsudp, *restcp, *resudp;
@@ -1083,6 +1097,7 @@ int main(int argc, char **argv)
 
     memset(buffer, 0, sizeof buffer);
 
+    // Initializes address info structs
     memset(&hintstcp, 0, sizeof hintstcp);
     hintstcp.ai_family = AF_INET;
     hintstcp.ai_socktype = SOCK_STREAM;
@@ -1092,6 +1107,7 @@ int main(int argc, char **argv)
     hintsudp.ai_socktype = SOCK_DGRAM;
     hintsudp.ai_flags = AI_PASSIVE | AI_NUMERICSERV;
 
+    // Sets up signal handlers for SIGPIPE and SIGCHLD
     memset(&act, 0, sizeof act);
     act.sa_handler = SIG_IGN;
     if (sigaction(SIGPIPE, &act, NULL) == -1)
@@ -1101,14 +1117,15 @@ int main(int argc, char **argv)
     if (sigaction(SIGCHLD, &act2, NULL) == -1)
         exit(1);
 
-    strcpy(port, "58039");
     setPort(argc, argv, port);
 
+    // Counts number of topics
     if ((dir = opendir("server/topics")) == NULL)
         exit(1);
+    readdir(dir); // Skips directory .
+    readdir(dir); // Skips directory ..
     while ((entry = readdir(dir)) != NULL)
         topic_amount++;
-    topic_amount -= 2; // Disregards directories . and ..
     closedir(dir);
 
     if ((errcode = getaddrinfo(NULL, port, &hintstcp, &restcp)) != 0)
@@ -1116,7 +1133,7 @@ int main(int argc, char **argv)
     if ((errcode = getaddrinfo(NULL, port, &hintsudp, &resudp)) != 0)
         exit(1);
 
-    /* tcp socket */
+    // Initializes TCP socket
     if ((listenfd = socket(restcp->ai_family, restcp->ai_socktype, restcp->ai_protocol)) == -1)
         exit(1);
     if (bind(listenfd, restcp->ai_addr, restcp->ai_addrlen) == -1)
@@ -1124,7 +1141,7 @@ int main(int argc, char **argv)
     if (listen(listenfd, 5) == -1)
         exit(1);
 
-    /* udp socket */
+    // Initializes UDP socket
     if ((udpfd = socket(resudp->ai_family, resudp->ai_socktype, resudp->ai_protocol)) == -1)
         exit(1);
     if ((errcode = bind(udpfd, resudp->ai_addr, resudp->ai_addrlen)) == -1)
@@ -1141,7 +1158,7 @@ int main(int argc, char **argv)
         if ((nready = select(maxfdp1 + 1, &rset, (fd_set *)NULL, (fd_set *)NULL, (struct timeval *)NULL)) <= 0)
             exit(1);
 
-        //Receives from TCP socket
+        // Ready to receive (TCP socket)
         if (FD_ISSET(listenfd, &rset))
         {
             len = sizeof(cliaddr);
@@ -1154,7 +1171,7 @@ int main(int argc, char **argv)
             if ((childpid = fork()) == 0)
             {
                 close(listenfd);
-                if (receivetcp(connfd, &cliaddr, &len) == -1)
+                if (receiveTCP(connfd, &cliaddr, &len) == -1)
                     exit(1);
                 else
                     exit(0);
@@ -1167,12 +1184,12 @@ int main(int argc, char **argv)
             if (errcode == -1)
                 exit(1);
         }
-        //Receives from UDP socket
+        // Ready to receive (UDP socket)
         if (FD_ISSET(udpfd, &rset))
         {
             len = sizeof(cliaddr);
             memset(buffer, 0, sizeof buffer);
-            if (receiveudp(udpfd, buffer, &cliaddr, &len) == -1)
+            if (receiveUDP(udpfd, buffer, &cliaddr, &len) == -1)
                 exit(1);
         }
     }
