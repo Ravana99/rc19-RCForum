@@ -43,28 +43,28 @@ void readUntil(int fd, char **bufferptr, int amount, char token)
     }
 }
 
-void read_full(int fd, char **responseptr, long n)
+void read_full(int fd, char **ptr, long n)
 {
     int nr;
     while (n > 0)
     {
-        if ((nr = read(fd, *responseptr, n)) <= 0)
+        if ((nr = read(fd, *ptr, n)) <= 0)
             exit(1);
         n -= nr;
-        *responseptr += nr;
+        *ptr += nr;
     }
 }
 
-void write_full(int fd, char *message, long n)
+void write_full(int fd, char *string, long n)
 {
     int nw;
-    char *messageptr = &message[0];
+    char *ptr = &string[0];
     while (n > 0)
     {
-        if ((nw = write(fd, messageptr, n)) <= 0)
+        if ((nw = write(fd, ptr, n)) <= 0)
             exit(1);
         n -= nw;
-        messageptr += nw;
+        ptr += nw;
     }
 }
 
@@ -115,6 +115,7 @@ int findTopic(char *topic, char *pathname)
     return 0;
 }
 
+// Finds a question in a certain topic and saves the ID of the submitter if id != NULL
 int findQuestion(char *question, char *pathname, int *id)
 {
     DIR *dir;
@@ -135,12 +136,129 @@ int findQuestion(char *question, char *pathname, int *id)
         {
             strcat(pathname, "/");
             strcat(pathname, question_folder);
-            *id = atoi(quserid);
+            if (id != NULL)
+                *id = atoi(quserid);
+            closedir(dir);
             return 1;
         }
     }
     closedir(dir);
     return 0;
+}
+
+int findQImg(char *pathname, char *ext)
+{
+    DIR *dir;
+    struct dirent *entry;
+    char img[32], delim[2] = ".";
+
+    if ((dir = opendir(pathname)) == NULL)
+        exit(1);
+    readdir(dir); // Skips directory .
+    readdir(dir); // Skips directory ..
+    while ((entry = readdir(dir)) != NULL)
+    {
+        strcpy(img, entry->d_name);
+        strtok(img, delim);
+        if (!strcmp(img, "qimg"))
+        {
+            strcpy(ext, strtok(NULL, delim));
+            closedir(dir);
+            return 1;
+        }
+    }
+    closedir(dir);
+    return 0;
+}
+
+int findAnswer(char *pathname, char *answer, int *id, int i)
+{
+    DIR *dir;
+    struct dirent *entry;
+    char i_txt[4], delim[3] = "_.", aux[4], aid[16];
+
+    if (i < 10)
+        sprintf(i_txt, "0%d", i);
+    else
+        sprintf(i_txt, "%d", i);
+
+    if ((dir = opendir(pathname)) == NULL)
+        return -1;
+    readdir(dir); // Skips directory .
+    readdir(dir); // Skips directory ..
+    while ((entry = readdir(dir)) != NULL)
+    {
+        strcpy(answer, entry->d_name);
+        strcpy(aux, strtok(entry->d_name, delim));
+        strcpy(aid, strtok(NULL, delim)); // Gets user ID
+        if (!strcmp(i_txt, aux))
+        {
+            strtok(answer, ".");
+            *id = atoi(aid);
+            closedir(dir);
+            return 1;
+        }
+    }
+    closedir(dir);
+    return 0;
+}
+
+int findAImg(char *pathname, char *answer, char *aiext, int i)
+{
+    DIR *dir;
+    struct dirent *entry;
+    char delim[2] = ".", i_txt[4], aux[16];
+
+    if (i < 10)
+        sprintf(i_txt, "0%d", i);
+    else
+        sprintf(i_txt, "%d", i);
+
+    if ((dir = opendir(pathname)) == NULL)
+        return -1;
+    readdir(dir); // Skips directory .
+    readdir(dir); // Skips directory ..
+    while ((entry = readdir(dir)) != NULL)
+    {
+        strcpy(aux, entry->d_name);
+        strtok(aux, delim);
+        strcpy(aiext, strtok(NULL, delim));
+
+        if (!strcmp(answer, aux) && strcmp(aiext, "txt"))
+        {
+            closedir(dir);
+            return 1;
+        }
+    }
+    closedir(dir);
+    return 0;
+}
+
+// Returns number of questions in a topic or -1 if it finds a duplicate
+int getQuestionCount(char *pathname, char *question)
+{
+    DIR *dir;
+    struct dirent *entry;
+    int question_count = 0;
+    char aux[32], delim[2] = "_";
+
+    if ((dir = opendir(pathname)) == NULL)
+        exit(1);
+    readdir(dir); // Skips directory .
+    readdir(dir); // Skips directory ..
+    while ((entry = readdir(dir)) != NULL)
+    {
+        question_count++;
+        strtok(entry->d_name, delim);
+        strcpy(aux, strtok(NULL, delim));
+        if (!strcmp(aux, question))
+        {
+            closedir(dir);
+            return -1;
+        }
+    }
+    closedir(dir);
+    return question_count;
 }
 
 // Returns number of answers in a question given a question path
@@ -160,6 +278,24 @@ int getAnswerCount(char *pathname)
     fclose(fp);
 
     return answer_count;
+}
+
+long getSizeOfFile(char *pathname, char *filename)
+{
+    FILE *fp;
+    long size;
+    char path_aux[512];
+
+    strcpy(path_aux, pathname);
+    strcat(path_aux, "/");
+    strcat(path_aux, filename);
+    if ((fp = fopen(path_aux, "r")) == NULL)
+        return -1;
+    fseek(fp, 0L, SEEK_END);
+    size = ftell(fp);
+    fclose(fp);
+
+    return size;
 }
 
 // ------ COMMANDS ------ //
@@ -301,13 +437,11 @@ int question_list(char *buffer, char *response)
 
 int question_get(int connfd, char *buffer)
 {
-    char id[16], topic[16], question[16], pathname[128], cmp[16], path_aux[128], ansf[4], img[16], iext[8], aux[64];
+    char topic[16], question[16], pathname[128], path_aux[128], img[16], iext[8], aux[64];
     char *response, *responseptr, *bufferptr;
-    int answer_count, fd, i, j, img_found = 0, quserid = -1;
+    int answer_count, fd, i, j, quserid = -1;
     long ressize = 2048, qsize, isize, realloc_aux;
-    DIR *dir;
     FILE *fp;
-    struct dirent *entry;
 
     if ((response = (char *)malloc(2048 * sizeof(char))) == NULL)
         return -1;
@@ -320,10 +454,13 @@ int question_get(int connfd, char *buffer)
     if (sscanf(buffer, "GQU %s %s\n", topic, question) != 2)
     {
         write_full(connfd, "QGR ERR\n", strlen("QGR ERR\n"));
+        printf("User is trying to get question... failure\n");
         free(response);
         free(buffer);
         return 0;
     }
+
+    printf("User is trying to get question %s of topic %s... ", question, topic);
 
     // Opens topic folder
     strcpy(pathname, "server/topics");
@@ -332,6 +469,7 @@ int question_get(int connfd, char *buffer)
         write_full(connfd, "QGR EOF\n", strlen("QGR EOF\n"));
         free(response);
         free(buffer);
+        printf("not found\n");
         return 0;
     }
 
@@ -341,32 +479,15 @@ int question_get(int connfd, char *buffer)
         write_full(connfd, "QGR EOF\n", strlen("QGR EOF\n"));
         free(response);
         free(buffer);
+        printf("not found\n");
         return 0;
     }
 
-    /* VOU AQUI */
-
     // Checking number of answers
-    strcpy(path_aux, pathname);
-    strcat(path_aux, "/anscount.txt");
-
-    if ((fd = open(path_aux, O_RDONLY)) < 0)
-        return -1;
-    if (read(fd, ansf, 2) != 2)
-        return -1;
-    if (close(fd) < 0)
-        return -1;
-
-    answer_count = atoi(ansf);
+    answer_count = getAnswerCount(pathname);
 
     // Determining size of question file
-    strcpy(path_aux, pathname);
-    strcat(path_aux, "/qinfo.txt");
-    if ((fp = fopen(path_aux, "r")) == NULL)
-        return -1;
-    fseek(fp, 0L, SEEK_END);
-    qsize = ftell(fp);
-    fclose(fp);
+    qsize = getSizeOfFile(pathname, "qinfo.txt");
 
     ressize += qsize;
     realloc_aux = responseptr - response;
@@ -378,11 +499,11 @@ int question_get(int connfd, char *buffer)
     responseptr = response + strlen(response);
 
     // Opens question text file
+    strcpy(path_aux, pathname);
+    strcat(path_aux, "/qinfo.txt");
     if ((fd = open(path_aux, O_RDONLY)) < 0)
         return -1;
-
     read_full(fd, &responseptr, qsize);
-
     if (close(fd) < 0)
         return -1;
 
@@ -390,42 +511,17 @@ int question_get(int connfd, char *buffer)
     responseptr++;
 
     // Opens image file if one exists
-    if ((dir = opendir(pathname)) == NULL)
-        return -1;
-    readdir(dir); // Skips directory .
-    readdir(dir); // Skips directory ..
-    while ((entry = readdir(dir)) != NULL)
+    if (findQImg(pathname, iext))
     {
-        strcpy(cmp, entry->d_name);
-        cmp[5] = '\0';
-        if (!strcmp(cmp, "qimg."))
-        {
-            img_found = 1;
-            strcpy(img, entry->d_name);
-            strcpy(path_aux, pathname);
-            strcat(path_aux, "/");
-            strcat(path_aux, entry->d_name);
-            break;
-        }
-    }
-    closedir(dir);
-
-    if (img_found)
-    {
-        img_found = 0;
         memcpy(responseptr, "1 ", 2);
         responseptr += 2;
-        sscanf(img, "qimg.%s", iext);
         memcpy(responseptr, iext, 3);
         responseptr += 3;
         memcpy(responseptr, " ", 1);
         responseptr += 1;
 
-        if ((fp = fopen(path_aux, "r")) == NULL)
-            return -1;
-        fseek(fp, 0L, SEEK_END);
-        isize = ftell(fp);
-        fclose(fp);
+        sprintf(img, "qimg.%s", iext);
+        isize = getSizeOfFile(pathname, img);
 
         ressize += isize;
         realloc_aux = responseptr - response;
@@ -440,11 +536,12 @@ int question_get(int connfd, char *buffer)
         responseptr += 1;
 
         // Opens image file
+        strcpy(path_aux, pathname);
+        strcat(path_aux, "/");
+        strcat(path_aux, img);
         if ((fd = open(path_aux, O_RDONLY)) < 0)
             return -1;
-
         read_full(fd, &responseptr, isize);
-
         if (close(fd) < 0)
             return -1;
 
@@ -471,37 +568,19 @@ int question_get(int connfd, char *buffer)
     for (i = answer_count, j = 0; i > 0 && j < 10; i--, j++)
     {
 
-        char i_txt[4], delim2[3] = "_.", aiext[8], answer[32];
+        char aiext[8], answer[32];
         long asize, aisize;
         int auserid;
 
-        if (i < 10)
-            sprintf(i_txt, "0%d", i);
-        else
-            sprintf(i_txt, "%d", i);
-
         // Opens question folder
-        if ((dir = opendir(pathname)) == NULL)
-            return -1;
-        readdir(dir); // Skips directory .
-        readdir(dir); // Skips directory ..
-        while ((entry = readdir(dir)) != NULL)
-        {
-            strcpy(answer, entry->d_name);
-            strcpy(cmp, strtok(entry->d_name, delim2));
-            strcpy(id, strtok(NULL, delim2)); // Gets user ID
-            if (!strcmp(i_txt, cmp))
-            {
-                auserid = atoi(id);
-                break;
-            }
-        }
-        closedir(dir);
+        findAnswer(pathname, answer, &auserid, i);
 
         // Determining size of answer text file
         strcpy(path_aux, pathname);
         strcat(path_aux, "/");
         strcat(path_aux, answer);
+        strcat(path_aux, ".txt");
+
         if ((fp = fopen(path_aux, "r")) == NULL)
             return -1;
         fseek(fp, 0L, SEEK_END);
@@ -514,7 +593,10 @@ int question_get(int connfd, char *buffer)
             return -1;
         responseptr = response + realloc_aux;
 
-        sprintf(aux, " %s %d %ld ", i_txt, auserid, asize);
+        if (i < 10)
+            sprintf(aux, " 0%d %d %ld ", i, auserid, asize);
+        else
+            sprintf(aux, " %d %d %ld ", i, auserid, asize);
         memcpy(responseptr, aux, strlen(aux));
         responseptr += strlen(aux);
 
@@ -531,32 +613,10 @@ int question_get(int connfd, char *buffer)
         responseptr++;
 
         // Opens image file if one exists
-        if ((dir = opendir(pathname)) == NULL)
-            return -1;
-        readdir(dir); // Skips directory .
-        readdir(dir); // Skips directory ..
-        while ((entry = readdir(dir)) != NULL)
+        if (findAImg(pathname, answer, aiext, i))
         {
-            strcpy(answer, entry->d_name);
-            strcpy(cmp, strtok(entry->d_name, delim2));
-            strcpy(id, strtok(NULL, delim2));
-            strcpy(aiext, strtok(NULL, delim2));
+            char image_name[32];
 
-            if (!strcmp(i_txt, cmp) && strcmp(aiext, ".txt"))
-            {
-                img_found = 1;
-                strcpy(img, entry->d_name);
-                strcpy(path_aux, pathname);
-                strcat(path_aux, "/");
-                strcat(path_aux, answer);
-                break;
-            }
-        }
-        closedir(dir);
-
-        if (img_found)
-        {
-            img_found = 0;
             memcpy(responseptr, "1 ", 2);
             responseptr += 2;
             memcpy(responseptr, aiext, 3);
@@ -564,11 +624,11 @@ int question_get(int connfd, char *buffer)
             memcpy(responseptr, " ", 1);
             responseptr += 1;
 
-            if ((fp = fopen(path_aux, "r")) == NULL)
-                return -1;
-            fseek(fp, 0L, SEEK_END);
-            aisize = ftell(fp);
-            fclose(fp);
+            strcpy(image_name, answer);
+            strcat(image_name, ".");
+            strcat(image_name, aiext);
+
+            aisize = getSizeOfFile(pathname, image_name);
 
             ressize += aisize;
             realloc_aux = responseptr - response;
@@ -583,11 +643,12 @@ int question_get(int connfd, char *buffer)
             responseptr += 1;
 
             // Opens image file
+            strcpy(path_aux, pathname);
+            strcat(path_aux, "/");
+            strcat(path_aux, image_name);
             if ((fd = open(path_aux, O_RDONLY)) < 0)
                 return -1;
-
             read_full(fd, &responseptr, aisize);
-
             if (close(fd) < 0)
                 return -1;
         }
@@ -600,6 +661,7 @@ int question_get(int connfd, char *buffer)
     memcpy(responseptr, "\n", 1);
     responseptr += 1;
     write_full(connfd, response, (long)(responseptr - response + 1));
+    printf("success\n");
     free(response);
     free(buffer);
     return 0;
@@ -607,25 +669,15 @@ int question_get(int connfd, char *buffer)
 
 int question_submit(int connfd, char *buffer)
 {
-    int space_count = 0, question_count = 0, duplicate_question = 0;
-    int quserid, n, fd, nw;
+    int question_count, quserid, n, fd;
     long qsize, realloc_aux, buffer_size = 2048;
-    DIR *dir;
-    struct dirent *entry;
-    char delim[2] = "_";
     char *ptr, *bufferptr;
-    char topic[16], cmp[16], question[16], pathname[128], path_aux[128], topic_folder[32];
+    char topic[16], question[16], pathname[128], path_aux[128], question_folder[32];
 
     bufferptr = &buffer[4];
 
-    do
-    { // Reads until 4th space (between qsize and qdata)
-        if ((n = read(connfd, bufferptr, 1)) <= 0)
-            exit(1);
-        if (*bufferptr == ' ')
-            space_count++;
-        bufferptr += n;
-    } while (space_count < 4);
+    // Reads until 4th space (between qsize and qdata)
+    readUntil(connfd, &bufferptr, 4, ' ');
 
     // Scans command information
     sscanf(buffer, "QUS %d %s %s %ld", &quserid, topic, question, &qsize);
@@ -646,39 +698,11 @@ int question_submit(int connfd, char *buffer)
     }
 
     // Opens topic folder
-    if ((dir = opendir("server/topics")) == NULL)
-        return -1;
-    readdir(dir); // Skips directory .
-    readdir(dir); // Skips directory ..
-    while ((entry = readdir(dir)) != NULL)
-    {
-        strcpy(topic_folder, entry->d_name);
-        strtok(entry->d_name, delim);
-        strcpy(cmp, strtok(NULL, delim));
-        if (!strcmp(cmp, topic))
-        {
-            sprintf(pathname, "server/topics/%s", topic_folder);
-            break;
-        }
-    }
-    closedir(dir);
+    findTopic(topic, pathname);
 
     // Counts number of questions in topic and checks for duplicate
-    if ((dir = opendir(pathname)) == NULL)
-        return -1;
-    readdir(dir); // Skips directory .
-    readdir(dir); // Skips directory ..
-    while ((entry = readdir(dir)) != NULL)
-    {
-        question_count++;
-        strtok(entry->d_name, delim);
-        strcpy(cmp, strtok(NULL, delim));
-        if (!strcmp(cmp, question))
-        {
-            duplicate_question = 1;
-            break;
-        }
-    }
+    question_count = getQuestionCount(pathname, question);
+
     if (question_count >= 99)
     {
         printf("full\n");
@@ -686,20 +710,21 @@ int question_submit(int connfd, char *buffer)
         free(buffer);
         return 0;
     }
-    else if (duplicate_question)
+    else if (question_count == -1) // Found a duplicate
     {
         printf("duplicate\n");
         write_full(connfd, "QUR DUP\n", strlen("QUR DUP\n"));
         free(buffer);
         return 0;
     }
-    closedir(dir);
 
     // Creates question folder
     if (question_count < 9)
-        sprintf(pathname, "server/topics/%s/0%d_%s_%d", topic_folder, question_count + 1, question, quserid);
+        sprintf(question_folder, "0%d_%s_%d", question_count + 1, question, quserid);
     else
-        sprintf(pathname, "server/topics/%s/%d_%s_%d", topic_folder, question_count + 1, question, quserid);
+        sprintf(question_folder, "%d_%s_%d", question_count + 1, question, quserid);
+    strcat(pathname, "/");
+    strcat(pathname, question_folder);
 
     if (mkdir(pathname, 0666) == -1) // Enables R/W for all users
         return -1;
@@ -721,22 +746,9 @@ int question_submit(int connfd, char *buffer)
     strcat(path_aux, "/qinfo.txt");
     if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0666)) < 0)
         return -1;
-    while ((n = read(connfd, bufferptr, qsize)) != 0)
-    {
-        if (n == -1)
-            return -1;
-        ptr = bufferptr;
-        qsize -= n;
-
-        while (n > 0)
-        {
-            if ((nw = write(fd, ptr, n)) <= 0)
-                return -1;
-            n -= nw;
-            ptr += nw;
-        }
-        bufferptr += n;
-    }
+    ptr = bufferptr;
+    read_full(connfd, &bufferptr, qsize);
+    write_full(fd, ptr, qsize);
 
     if (close(fd) < 0)
         return -1;
@@ -756,15 +768,8 @@ int question_submit(int connfd, char *buffer)
         char *ptr_aux = bufferptr;
         char iext[4];
         long isize;
-        space_count = 0;
-        do // Reads 3 more spaces (until the space between isize and idata)
-        {
-            if ((n = read(connfd, bufferptr, 1)) <= 0)
-                exit(1);
-            if (*bufferptr == ' ')
-                space_count++;
-            bufferptr += n;
-        } while (space_count < 3);
+
+        readUntil(connfd, &bufferptr, 3, ' ');
 
         sscanf(ptr_aux, " %s %ld ", iext, &isize);
 
@@ -779,21 +784,11 @@ int question_submit(int connfd, char *buffer)
 
         if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0666)) < 0)
             return -1;
-        while ((n = read(connfd, bufferptr, isize)) != 0)
-        {
-            if (n == -1)
-                return -1;
-            ptr = bufferptr;
-            isize -= n;
-            while (n > 0)
-            {
-                if ((nw = write(fd, ptr, n)) <= 0)
-                    return -1;
-                n -= nw;
-                ptr += nw;
-            }
-            bufferptr += n;
-        }
+
+        ptr = bufferptr;
+        read_full(connfd, &bufferptr, isize);
+        write_full(fd, ptr, isize);
+
         if (close(fd) < 0)
             return -1;
 
@@ -844,25 +839,15 @@ int question_submit(int connfd, char *buffer)
 
 int answer_submit(int connfd, char *buffer)
 {
-    int space_count = 0, answer_count = 0;
-    int auserid, n, fd, nw;
+    int answer_count = 0;
+    int auserid, n, fd;
     long asize, realloc_aux, buffer_size = 2048;
-    DIR *dir;
-    struct dirent *entry;
-    char delim[2] = "_";
     char *ptr, *bufferptr;
-    char topic[16], cmp[16], question[16], pathname[128], path_aux[128], topic_folder[32], question_folder[32], ansf[4], answer_name[32];
+    char topic[16], question[16], pathname[128], path_aux[128], ansf[4], answer_name[32];
 
     bufferptr = &buffer[4];
 
-    do
-    { // Reads until 4th space (between asize and adata)
-        if ((n = read(connfd, bufferptr, 1)) <= 0)
-            exit(1);
-        if (*bufferptr == ' ')
-            space_count++;
-        bufferptr += n;
-    } while (space_count < 4);
+    readUntil(connfd, &bufferptr, 4, ' ');
 
     // Scans command information
     sscanf(buffer, "ANS %d %s %s %ld", &auserid, topic, question, &asize);
@@ -875,54 +860,13 @@ int answer_submit(int connfd, char *buffer)
     printf("User %d is trying to submit answer for question %s in topic %s... ", auserid, question, topic);
 
     // Opens topic folder
-    if ((dir = opendir("server/topics")) == NULL)
-        return -1;
-    readdir(dir); // Skips directory .
-    readdir(dir); // Skips directory ..
-    while ((entry = readdir(dir)) != NULL)
-    {
-        strcpy(topic_folder, entry->d_name);
-        strtok(entry->d_name, delim);
-        strcpy(cmp, strtok(NULL, delim));
-        if (!strcmp(cmp, topic))
-        {
-            sprintf(pathname, "server/topics/%s", topic_folder);
-            break;
-        }
-    }
-    closedir(dir);
+    findTopic(topic, pathname);
 
     // Opens question folder
-    if ((dir = opendir(pathname)) == NULL)
-        return -1;
-    readdir(dir); // Skips directory .
-    readdir(dir); // Skips directory ..
-    while ((entry = readdir(dir)) != NULL)
-    {
-        strcpy(question_folder, entry->d_name);
-        strtok(entry->d_name, delim);
-        strcpy(cmp, strtok(NULL, delim));
-        if (!strcmp(cmp, question))
-        {
-            strcat(pathname, "/");
-            strcat(pathname, question_folder);
-            break;
-        }
-    }
-    closedir(dir);
+    findQuestion(question, pathname, NULL);
 
     // Checking number of answers
-    strcpy(path_aux, pathname);
-    strcat(path_aux, "/anscount.txt");
-
-    if ((fd = open(path_aux, O_RDONLY)) < 0)
-        return -1;
-    if (read(fd, ansf, 2) != 2)
-        return -1;
-    if (close(fd) < 0)
-        return -1;
-
-    answer_count = atoi(ansf);
+    answer_count = getAnswerCount(pathname);
 
     if (answer_count >= 99)
     {
@@ -932,12 +876,14 @@ int answer_submit(int connfd, char *buffer)
     }
     else
     {
+        strcpy(path_aux, pathname);
+        strcat(path_aux, "/anscount.txt");
         if ((fd = open(path_aux, O_WRONLY | O_TRUNC)) < 0)
             return -1;
         answer_count++;
         sprintf(ansf, "%d\n", answer_count);
-        if (write(fd, ansf, (answer_count > 9 ? 3 : 2)) != (answer_count > 9 ? 3 : 2))
-            return -1;
+
+        write_full(fd, ansf, strlen(ansf));
 
         if (close(fd) < 0)
             return -1;
@@ -954,22 +900,10 @@ int answer_submit(int connfd, char *buffer)
 
     if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0666)) < 0)
         return -1;
-    while ((n = read(connfd, bufferptr, asize)) != 0)
-    {
-        if (n == -1)
-            return -1;
-        ptr = bufferptr;
-        asize -= n;
 
-        while (n > 0)
-        {
-            if ((nw = write(fd, ptr, n)) <= 0)
-                return -1;
-            n -= nw;
-            ptr += nw;
-        }
-        bufferptr += n;
-    }
+    ptr = bufferptr;
+    read_full(connfd, &bufferptr, asize);
+    write_full(fd, ptr, asize);
 
     if (close(fd) < 0)
         return -1;
@@ -986,20 +920,13 @@ int answer_submit(int connfd, char *buffer)
 
     if (*(bufferptr - n) == '1') // Has image to read
     {
-        char *ptr_aux = bufferptr;
         char iext[4];
         long isize;
-        space_count = 0;
-        do // Reads 3 more spaces (until the space between isize and idata)
-        {
-            if ((n = read(connfd, bufferptr, 1)) <= 0)
-                exit(1);
-            if (*bufferptr == ' ')
-                space_count++;
-            bufferptr += n;
-        } while (space_count < 3);
 
-        sscanf(ptr_aux, " %s %ld ", iext, &isize);
+        ptr = bufferptr;
+        readUntil(connfd, &bufferptr, 3, ' ');
+
+        sscanf(ptr, " %s %ld ", iext, &isize);
 
         realloc_aux = bufferptr - buffer;
         if ((buffer = (char *)realloc(buffer, (buffer_size + asize + isize) * sizeof(char))) == NULL)
@@ -1016,21 +943,11 @@ int answer_submit(int connfd, char *buffer)
 
         if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0666)) < 0)
             return -1;
-        while ((n = read(connfd, bufferptr, isize)) != 0)
-        {
-            if (n == -1)
-                return -1;
-            ptr = bufferptr;
-            isize -= n;
-            while (n > 0)
-            {
-                if ((nw = write(fd, ptr, n)) <= 0)
-                    return -1;
-                n -= nw;
-                ptr += nw;
-            }
-            bufferptr += n;
-        }
+
+        ptr = bufferptr;
+        read_full(connfd, &bufferptr, isize);
+        write_full(fd, ptr, isize);
+
         if (close(fd) < 0)
             return -1;
 
@@ -1124,19 +1041,12 @@ int receivetcp(int connfd, struct sockaddr_in *cliaddr, socklen_t *len)
 {
     char request[128];
     char *bufferptr, *buffer;
-    int n;
 
     if ((buffer = (char *)malloc(2048 * sizeof(char))) == NULL)
         exit(1);
     bufferptr = &buffer[0];
 
-    do
-    {
-        if ((n = read(connfd, bufferptr, 1)) <= 0)
-            return -1;
-        bufferptr += n;
-    } while (*(bufferptr - n) != ' ');
-
+    readUntil(connfd, &bufferptr, 1, ' ');
     sscanf(buffer, "%s ", request);
 
     //Gets question
@@ -1209,7 +1119,6 @@ int main(int argc, char **argv)
     /* tcp socket */
     if ((listenfd = socket(restcp->ai_family, restcp->ai_socktype, restcp->ai_protocol)) == -1)
         exit(1);
-    //if (setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &(int){ 1 }, sizeof(int)) < 0) exit(1);
     if (bind(listenfd, restcp->ai_addr, restcp->ai_addrlen) == -1)
         exit(1);
     if (listen(listenfd, 5) == -1)
@@ -1220,7 +1129,6 @@ int main(int argc, char **argv)
         exit(1);
     if ((errcode = bind(udpfd, resudp->ai_addr, resudp->ai_addrlen)) == -1)
         exit(1);
-    //if (setsockopt(udpfd, SOL_SOCKET, SO_REUSEADDR, &(int){ 1 }, sizeof(int)) < 0) exit(1);
 
     FD_ZERO(&rset);
     maxfdp1 = max(listenfd, udpfd) + 1;
@@ -1259,7 +1167,6 @@ int main(int argc, char **argv)
             if (errcode == -1)
                 exit(1);
         }
-
         //Receives from UDP socket
         if (FD_ISSET(udpfd, &rset))
         {
@@ -1273,6 +1180,5 @@ int main(int argc, char **argv)
     freeaddrinfo(resudp);
     close(listenfd);
     close(udpfd);
-
     exit(0);
 }
