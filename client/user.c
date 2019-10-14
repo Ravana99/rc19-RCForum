@@ -384,6 +384,7 @@ void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *
     close(tcpfd);
     free(message);
 }
+
 void answerSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *restcp,
                   int userid, Topic active_topic, char *active_question)
 {
