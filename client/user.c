@@ -309,16 +309,18 @@ void questionGet(char *message, char *response, struct addrinfo *restcp, int act
             printf("Invalid topic name\n\n");
     }*/
 }
-void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *restcp, int userid, int active_topic_number, Topic *topic_list)
+void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *restcp, int userid, int active_topic_number, Topic active_topic, char *active_question)
 {
     FILE *fp;
     long int message_length;
     char question[11], filename[NAME_MAX + 3], imagefilename[NAME_MAX + 3],
-        qdata[2048], iext[4], *tcp_message, imgBuffer[1024];
-    ssize_t qsize = 0, isize = 0, isizeTMP, n;
+        qdata[2048], iext[4], *message, imgBuffer[1024];
+    ssize_t qsize = 0, isize = 0, n;
 
     imagefilename[0] = '\0';
     sscanf(inputptr, "%s %s %s", question, filename, imagefilename);
+    strcpy(active_question, question);
+
     strcat(filename, ".txt");
     fp = fopen(filename, "r");
     if (fp == NULL)
@@ -331,7 +333,8 @@ void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *
     fseek(fp, 0L, SEEK_SET);
     fread(qdata, sizeof(char) * qsize, 1, fp);
     fclose(fp);
-    message_length = 3 + 1 + 5 + 1 + strlen(topic_list[active_topic_number].name) +
+
+    message_length = 3 + 1 + 5 + 1 + strlen(active_topic.name) +
                      1 + strlen(question) + 1 + getNumberOfDigits(qsize) + 1 +
                      strlen(qdata) + 1 + 1 + 1;
 
@@ -345,51 +348,118 @@ void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *
             printf("Image File Not Found!\n\n");
             return;
         }
+
         getImageExtension(imagefilename, iext);
+
         fseek(fp, 0L, SEEK_END);
         isize = ftell(fp);
         fseek(fp, 0L, SEEK_SET);
 
         message_length += 3 + 1 + getNumberOfDigits(isize) + 1;
-        tcp_message = malloc(sizeof(char) * message_length);
-        sprintf(tcp_message, "QUS %d %s %s %ld %s 1 %s %ld ",
-                userid, topic_list[active_topic_number].name, question, qsize, qdata, iext, isize);
-        //strtok(tcp_message, "\n");
-        //QUS 12345 sjfbn qqq 14 DUMMY MESSAGE\n 1 jpg 574870
-        printf("MSG Length:%ld\n%s\n", message_length, tcp_message);
-        writeTCP(tcpfd, tcp_message, &message_length);
-        printf("MSG Length:%ld\n", message_length);
-        //TESTAR SE IMAGEM ESTA BEM
-        //fp = fopen("damn2.jpg", "wb");
-        //fwrite(idata, sizeof(char) * isize, 1, fp);
-        //fclose(fp);
-        //TODO, CHANGE TO READ 1024chars at time and send
-        isizeTMP = isize;
-        while (isizeTMP > 0)
+        message = malloc(sizeof(char) * message_length);
+        sprintf(message, "QUS %d %s %s %ld %s 1 %s %ld ",
+                userid, active_topic.name, question, qsize, qdata, iext, isize);
+
+        writeTCP(tcpfd, message, &message_length); //write of everything, except image content
+        while (isize > 0)                          // write of image content, 1024 characters in each iteration
         {
             n = read(fileno(fp), imgBuffer, sizeof(char) * 1024);
-            isizeTMP -= n;
+            isize -= n;
             writeTCP(tcpfd, imgBuffer, &n);
         }
-        n = 1;
-        writeTCP(tcpfd, "\n", &n);
+        isize = 1;
+        writeTCP(tcpfd, "\n", &isize);
+
         fclose(fp);
     }
     else
     {
-        tcp_message = malloc(sizeof(char) * message_length);
-        sprintf(tcp_message, "QUS %d %s %s %ld %s 0\n", userid, topic_list[active_topic_number].name, question, qsize, qdata);
-        printf("MESSAGE: %s\n", tcp_message);
-        writeTCP(tcpfd, tcp_message, &message_length);
+        message = malloc(sizeof(char) * message_length);
+        sprintf(message, "QUS %d %s %s %ld %s 0\n", userid, active_topic.name, question, qsize, qdata);
+        writeTCP(tcpfd, message, &message_length);
     }
     readTCP(tcpfd, response);
-    printf("%s\n\n", response);
+    printf("%s\n", response);
+
     close(tcpfd);
-    free(tcp_message);
+    free(message);
 }
-void answerSubmit()
+void answerSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *restcp,
+                  int userid, Topic active_topic, char *active_question)
 {
+    FILE *fp;
+    long int message_length;
+    char filename[NAME_MAX + 3], imagefilename[NAME_MAX + 3],
+        adata[2048], iext[4], *message, imgBuffer[1024];
+    ssize_t asize = 0, isize = 0, n;
+
+    imagefilename[0] = '\0';
+    sscanf(inputptr, "%s %s", filename, imagefilename);
+
+    strcat(filename, ".txt");
+    fp = fopen(filename, "r");
+    if (fp == NULL)
+    {
+        printf("Answer File Not Found!\n\n");
+        return;
+    }
+    fseek(fp, 0L, SEEK_END);
+    asize = ftell(fp);
+    fseek(fp, 0L, SEEK_SET);
+    fread(adata, sizeof(char) * asize, 1, fp);
+    fclose(fp);
+
+    message_length = 3 + 1 + 5 + 1 + strlen(active_topic.name) +
+                     1 + strlen(active_question) + 1 + getNumberOfDigits(asize) + 1 +
+                     strlen(adata) + 1 + 1 + 1;
+
+    openAndConnectToSocketTCP(restcp, &tcpfd);
+
+    if (imagefilename[0] != '\0')
+    {
+        fp = fopen(imagefilename, "rb");
+        if (fp == NULL)
+        {
+            printf("Image File Not Found!\n\n");
+            return;
+        }
+
+        getImageExtension(imagefilename, iext);
+
+        fseek(fp, 0L, SEEK_END);
+        isize = ftell(fp);
+        fseek(fp, 0L, SEEK_SET);
+
+        message_length += 3 + 1 + getNumberOfDigits(isize) + 1;
+        message = malloc(sizeof(char) * message_length);
+        sprintf(message, "ANS %d %s %s %ld %s 1 %s %ld ",
+                userid, active_topic.name, active_question, asize, adata, iext, isize);
+
+        writeTCP(tcpfd, message, &message_length); //write of everything, except image content
+        while (isize > 0)                          // write of image content, 1024 characters in each iteration
+        {
+            n = read(fileno(fp), imgBuffer, sizeof(char) * 1024);
+            isize -= n;
+            writeTCP(tcpfd, imgBuffer, &n);
+        }
+        isize = 1;
+        writeTCP(tcpfd, "\n", &isize);
+
+        fclose(fp);
+    }
+    else
+    {
+        message = malloc(sizeof(char) * message_length);
+        sprintf(message, "ANS %d %s %s %ld %s 0\n", userid, active_topic.name, active_question, asize, adata);
+        writeTCP(tcpfd, message, &message_length);
+    }
+    readTCP(tcpfd, response);
+    printf("%s\n", response);
+
+    close(tcpfd);
+    free(message);
 }
+
 void quit(struct addrinfo *restcp, struct addrinfo *resudp, int udpfd, char *message)
 {
     free(message);
@@ -407,7 +477,7 @@ int main(int argc, char **argv)
     int tcpfd = 0, udpfd = 0, active_topic_number = 0, number_of_topics = 0, userid = 0;
     struct sigaction act;
 
-    char port[16], hostname[128], buffer[128], input[128], command[128], response[2048];
+    char port[16], hostname[128], buffer[128], input[128], command[128], response[2048], active_question[11];
     char *inputptr, *message;
 
     //memset(topic_list, 0, sizeof topic_list);
@@ -476,10 +546,10 @@ int main(int argc, char **argv)
             questionGet(message, response, restcp, active_topic_number, topic_list, true);
 
         else if (!strcmp(command, "question_submit") || !strcmp(command, "qs"))
-            questionSubmit(tcpfd, inputptr, response, restcp, userid, active_topic_number, topic_list);
+            questionSubmit(tcpfd, inputptr, response, restcp, userid, active_topic_number, topic_list[active_topic_number], active_question);
 
         else if (!strcmp(command, "answer_submit") || !strcmp(command, "as"))
-            answerSubmit();
+            answerSubmit(tcpfd, inputptr, response, restcp, userid, topic_list[active_topic_number], active_question);
 
         else
             printf("Unknown command\n\n");
