@@ -312,7 +312,6 @@ void questionGet(char *message, char *response, struct addrinfo *restcp, int act
 void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *restcp, int userid, int active_topic_number, Topic *topic_list)
 {
     FILE *fp;
-
     long int message_length;
     char question[11], filename[NAME_MAX + 3], imagefilename[NAME_MAX + 3],
         qdata[2048], iext[4], *tcp_message, imgBuffer[1024];
@@ -350,14 +349,16 @@ void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *
         fseek(fp, 0L, SEEK_END);
         isize = ftell(fp);
         fseek(fp, 0L, SEEK_SET);
-        //idata = malloc(sizeof(char) * isize + 1);
 
         message_length += 3 + 1 + getNumberOfDigits(isize) + 1;
         tcp_message = malloc(sizeof(char) * message_length);
         sprintf(tcp_message, "QUS %d %s %s %ld %s 1 %s %ld ",
                 userid, topic_list[active_topic_number].name, question, qsize, qdata, iext, isize);
-
+        //strtok(tcp_message, "\n");
+        //QUS 12345 sjfbn qqq 14 DUMMY MESSAGE\n 1 jpg 574870
+        printf("MSG Length:%ld\n%s\n", message_length, tcp_message);
         writeTCP(tcpfd, tcp_message, &message_length);
+        printf("MSG Length:%ld\n", message_length);
         //TESTAR SE IMAGEM ESTA BEM
         //fp = fopen("damn2.jpg", "wb");
         //fwrite(idata, sizeof(char) * isize, 1, fp);
@@ -373,13 +374,6 @@ void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *
         n = 1;
         writeTCP(tcpfd, "\n", &n);
         fclose(fp);
-        //message_length += 1 + 3 + 1 + getNumberOfDigits(isize) + 1 + isize / sizeof(char) + 1;
-
-        // num_of_chars_written =
-        //memcpy(tcp_message + num_of_chars_written,
-        //        idata, isize);
-
-        // tcp_message[message_length - 1] = '\n';
     }
     else
     {
@@ -387,9 +381,9 @@ void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *
         sprintf(tcp_message, "QUS %d %s %s %ld %s 0\n", userid, topic_list[active_topic_number].name, question, qsize, qdata);
         printf("MESSAGE: %s\n", tcp_message);
         writeTCP(tcpfd, tcp_message, &message_length);
-        readTCP(tcpfd, response);
-        printf("%s\n\n", response);
     }
+    readTCP(tcpfd, response);
+    printf("%s\n\n", response);
     close(tcpfd);
     free(tcp_message);
 }
