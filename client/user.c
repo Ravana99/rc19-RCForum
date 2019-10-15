@@ -17,16 +17,10 @@
 #include <stdbool.h>
 #include <limits.h>
 
-struct answer
-{
-    char name[16];
-} typedef Answer;
 struct topic
 {
     char name[16];
     int id;
-    Answer answers[99];
-    //guardar as respostas aqui ou fzr pedido udp?
 } typedef Topic;
 
 void setHostNameAndPort(int argc, char **argv, char *hostname, char *port)
@@ -117,13 +111,13 @@ void openAndConnectToSocketTCP(struct addrinfo *restcp, int *tcpfd)
     }
 }
 
-void writeTCP(int tcpfd, char *message, ssize_t *message_length)
+void writeTCP(int tcpfd, char *buffer, ssize_t *buffer_length)
 {
     ssize_t nleft, n;
     char *ptr;
-    nleft = getMin(1024, *message_length) * sizeof(char);
+    nleft = getMin(1024, *buffer_length) * sizeof(char);
     //printf("NLEFT %zu\n%s\n\n", nleft, message);
-    ptr = message;
+    ptr = buffer;
     while (nleft > 0)
     {
         if ((n = write(tcpfd, ptr, nleft)) <= 0)
@@ -133,19 +127,19 @@ void writeTCP(int tcpfd, char *message, ssize_t *message_length)
             exit(EXIT_FAILURE);
         }
         nleft -= n;
-        *message_length -= n;
+        *buffer_length -= n;
         ptr += n;
     }
 }
 
-void readTCP(int tcpfd, char *response)
+void readTCP(int tcpfd, char *buffer, char terminalChar)
 {
     ssize_t n;
-    // char *ptr;
-    //  ptr = response;
+    char *ptr;
+    ptr = buffer;
     do
     {
-        if ((n = read(tcpfd, response, 1)) == -1)
+        if ((n = read(tcpfd, ptr, 1)) == -1)
         {
             write(1, "RERROR\n", 7);
             printf("%s\n", strerror(errno));
@@ -153,9 +147,11 @@ void readTCP(int tcpfd, char *response)
         }
         else if (n == 0)
             break;
-        response += n;
-    } while (*(response - n) != '\n');
-    //close(tcpfd);
+        //printf("%c\n", *ptr);
+        ptr += n;
+    } while (*(ptr - n) != terminalChar);
+    ptr--;
+    *ptr = '\0';
 }
 
 /////////////
@@ -279,37 +275,95 @@ void questionList(char *message, char *response, int udpfd, struct addrinfo *res
         }
     }
 }
-void questionGet(char *message, char *response, struct addrinfo *restcp, int active_topic_number, Topic *topic_list, bool selectByNumber)
+void questionGet(int tcpfd, char *inputptr, char *message, char *response, struct addrinfo *restcp, Topic active_topic, bool selectByNumber)
 {
-    /*if (selectByNumber)
-    { 
-        char small_buffer[5];
-        sscanf(inputptr, "%s", small_buffer);
-        tmp_topic_number = atoi(small_buffer);
+    ssize_t message_length;
+    if (selectByNumber)
+    {
+        char question_number[6];
+        sscanf(inputptr, "%s", question_number);
+        //tmp_topic_number = atoi(small_buffer);
 
-        if (tmp_topic_number <= 0 || tmp_topic_number > number_of_topics)
-            printf("Invalid topic number\n\n");
-        else
-        {
-            *active_topic_number = tmp_topic_number;
-            printf("Selected topic: %s (proposed by %d)\n\n", topic_list[*active_topic_number].name, topic_list[*active_topic_number].id);
-        }
+        // if (tmp_topic_number <= 0 || tmp_topic_number > number_of_topics)
+        //    printf("Invalid topic number\n\n");
+        //else
+        // {
+        //     *active_topic_number = tmp_topic_number;
+        //    printf("Selected topic: %s (proposed by %d)\n\n", topic_list[*active_topic_number].name, topic_list[*active_topic_number].id);
+        //}
+        //sprintf(message, "GQU %s %s\n", active_topic.name, question_number);
     }
     else
     {
-        sscanf(inputptr, "%s", buffer);
-        for (int i = 1; i <= number_of_topics; i++)
-            if (!strcmp(buffer, topic_list[i].name))
+        //QGR qUserID  qsize  qdata  qIMG[qiext  qisize  qidata]  N (AN aUserID asize adata aIMG [aiext aisize aidata])*
+        int i;
+        char question[11], qUserID[6], qsize[128], qIMG[2], qiext[4], qisize[128], garbage[10];
+        char *qdata, *qidata, *adata, *aidata;
+        char qCommand[4], aCommand[4], N[3]; //aCommand[4] WHY doesnt 3 work???
+        char aUserID[6], asize[128], aIMG[2], aiext[4], aisize[128];
+        sscanf(inputptr, "%s", question);
+        sprintf(message, "GQU %s %s\n", active_topic.name, question);
+        message_length = 3 + 1 + strlen(active_topic.name) + 1 + strlen(question) + 1;
+        openAndConnectToSocketTCP(restcp, &tcpfd);
+        writeTCP(tcpfd, message, &message_length);
+        readTCP(tcpfd, qCommand, ' ');
+        readTCP(tcpfd, qUserID, ' ');
+        readTCP(tcpfd, qsize, ' ');
+
+        qdata = malloc(sizeof(char) * (atoi(qsize) + 1));
+
+        readTCP(tcpfd, qdata, '\n');
+        readTCP(tcpfd, garbage, ' '); // discard space after \n
+        readTCP(tcpfd, qIMG, ' ');
+        printf("QIMAGE:%s\n", qIMG);
+
+        //mkdir("client/topics", 0666);
+        if (atoi(qIMG))
+        {
+            readTCP(tcpfd, qiext, ' ');
+            readTCP(tcpfd, qisize, ' ');
+            qidata = malloc(sizeof(char) * (atoi(qisize) + 1));
+            readTCP(tcpfd, qidata, '\n');
+            printf("%s %s %s %s %s %s %s %s\n", qCommand, qUserID, qsize, qdata, qIMG, qiext, qisize, qidata);
+        }
+        else
+        {
+            printf("%s %s %s %s %s\n", qCommand, qUserID, qsize, qdata, qIMG);
+        }
+
+        // readTCP(tcpfd, garbage, '\n'); // discard space after \n
+        readTCP(tcpfd, N, ' ');
+        printf("%s\n", N);
+        for (i = 0; i < atoi(N); i++)
+        {
+            readTCP(tcpfd, aCommand, ' ');
+            readTCP(tcpfd, aUserID, ' ');
+            readTCP(tcpfd, asize, ' ');
+            adata = malloc(sizeof(char) * (atoi(asize) + 1));
+            readTCP(tcpfd, adata, '\n');
+            readTCP(tcpfd, garbage, ' '); // discard space after \n
+            readTCP(tcpfd, aIMG, ' ');
+            if (atoi(aIMG))
             {
-                printf("Selected topic: %s (proposed by %d)\n\n", topic_list[i].name, topic_list[i].id);
-                *active_topic_number = tmp_topic_number = i;
-                break;
+                readTCP(tcpfd, aiext, ' ');
+                readTCP(tcpfd, aisize, ' ');
+                aidata = malloc(sizeof(char) * (atoi(aisize) + 1));
+                readTCP(tcpfd, aidata, '\n');
+                printf("%s %s %s %s %s %s %s %s\n", aCommand, aUserID, asize, adata, aIMG, aiext, aisize, aidata);
             }
-        if (!tmp_topic_number)
-            printf("Invalid topic name\n\n");
-    }*/
+            else
+            {
+                printf("%s %s %s %s %s\n", aCommand, aUserID, asize, adata, aIMG);
+            }
+        }
+        close(tcpfd);
+        //free(qdata);
+        //free(qidata);
+        //free(adata);
+        //free(aidata);
+    }
 }
-void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *restcp, int userid, int active_topic_number, Topic active_topic, char *active_question)
+void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *restcp, int userid, Topic active_topic, char *active_question)
 {
     FILE *fp;
     long int message_length;
@@ -378,7 +432,7 @@ void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *
         sprintf(message, "QUS %d %s %s %ld %s 0\n", userid, active_topic.name, question, qsize, qdata);
         writeTCP(tcpfd, message, &message_length);
     }
-    readTCP(tcpfd, response);
+    readTCP(tcpfd, response, '\n');
     printf("%s\n", response);
 
     close(tcpfd);
@@ -454,7 +508,7 @@ void answerSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *re
         sprintf(message, "ANS %d %s %s %ld %s 0\n", userid, active_topic.name, active_question, asize, adata);
         writeTCP(tcpfd, message, &message_length);
     }
-    readTCP(tcpfd, response);
+    readTCP(tcpfd, response, '\n');
     printf("%s\n", response);
 
     close(tcpfd);
@@ -463,7 +517,7 @@ void answerSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *re
 
 void quit(struct addrinfo *restcp, struct addrinfo *resudp, int udpfd, char *message)
 {
-    free(message);
+    //free(message);
     freeaddrinfo(restcp);
     freeaddrinfo(resudp);
     close(udpfd);
@@ -511,7 +565,6 @@ int main(int argc, char **argv)
 
     while (1)
     {
-
         //printf("Number of topics %d\nActive Topic %s\nUserID %d\n", number_of_topics, topic_list[active_topic_number].name, userid);
         fgets(input, 2048, stdin);
         if (!strcmp(input, "\n"))
@@ -542,12 +595,12 @@ int main(int argc, char **argv)
                          active_topic_number, number_of_topics, topic_list);
 
         else if (!strcmp(command, "question_get"))
-            questionGet(message, response, restcp, active_topic_number, topic_list, false);
+            questionGet(tcpfd, inputptr, message, response, restcp, topic_list[active_topic_number], false);
         else if (!strcmp(command, "qg"))
-            questionGet(message, response, restcp, active_topic_number, topic_list, true);
+            questionGet(tcpfd, inputptr, message, response, restcp, topic_list[active_topic_number], true);
 
         else if (!strcmp(command, "question_submit") || !strcmp(command, "qs"))
-            questionSubmit(tcpfd, inputptr, response, restcp, userid, active_topic_number, topic_list[active_topic_number], active_question);
+            questionSubmit(tcpfd, inputptr, response, restcp, userid, topic_list[active_topic_number], active_question);
 
         else if (!strcmp(command, "answer_submit") || !strcmp(command, "as"))
             answerSubmit(tcpfd, inputptr, response, restcp, userid, topic_list[active_topic_number], active_question);
