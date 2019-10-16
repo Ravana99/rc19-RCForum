@@ -137,10 +137,10 @@ int findTopic(char *topic, char *pathname)
 
     if ((dir = opendir("server/topics")) == NULL)
         exit(1);
-    readdir(dir); // Skips directory .
-    readdir(dir); // Skips directory ..
     while ((entry = readdir(dir)) != NULL)
     {
+        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
+            continue;
         strcpy(topic_folder, entry->d_name);
         strtok(entry->d_name, delim);
         strcpy(topic_name, strtok(NULL, delim));
@@ -166,10 +166,10 @@ int findQuestion(char *question, char *pathname, int *id)
 
     if ((dir = opendir(pathname)) == NULL)
         exit(1);
-    readdir(dir); // Skips directory .
-    readdir(dir); // Skips directory ..
     while ((entry = readdir(dir)) != NULL)
     {
+        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
+            continue;
         strcpy(question_folder, entry->d_name);
         strtok(entry->d_name, delim);
         strcpy(question_name, strtok(NULL, delim));
@@ -198,10 +198,10 @@ int findQImg(char *pathname, char *ext)
 
     if ((dir = opendir(pathname)) == NULL)
         exit(1);
-    readdir(dir); // Skips directory .
-    readdir(dir); // Skips directory ..
     while ((entry = readdir(dir)) != NULL)
     {
+        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
+            continue;
         strcpy(img_name, entry->d_name);
         strtok(img_name, delim);
         if (!strcmp(img_name, "qimg"))
@@ -229,10 +229,10 @@ int findAnswer(char *pathname, char *answer, int *id, int i)
 
     if ((dir = opendir(pathname)) == NULL)
         exit(1);
-    readdir(dir); // Skips directory .
-    readdir(dir); // Skips directory ..
     while ((entry = readdir(dir)) != NULL)
     {
+        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
+            continue;
         strcpy(answer, entry->d_name);
         strcpy(aux, strtok(entry->d_name, delim));
         strcpy(aid, strtok(NULL, delim)); // Gets user ID
@@ -258,10 +258,10 @@ int findAImg(char *pathname, char *answer, char *aiext)
 
     if ((dir = opendir(pathname)) == NULL)
         exit(1);
-    readdir(dir); // Skips directory .
-    readdir(dir); // Skips directory ..
     while ((entry = readdir(dir)) != NULL)
     {
+        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
+            continue;
         strcpy(aux, entry->d_name);
         strtok(aux, delim);
         strcpy(aiext, strtok(NULL, delim));
@@ -286,10 +286,10 @@ int getQuestionCount(char *pathname, char *question)
 
     if ((dir = opendir(pathname)) == NULL)
         exit(1);
-    readdir(dir); // Skips directory .
-    readdir(dir); // Skips directory ..
     while ((entry = readdir(dir)) != NULL)
     {
+        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
+            continue;
         question_count++;
         strtok(entry->d_name, delim);
         strcpy(aux, strtok(NULL, delim));
@@ -374,10 +374,10 @@ int topicList(char *response)
     // Lists every directory
     if ((dir = opendir("server/topics")) == NULL)
         return -1;
-    readdir(dir); // Skips directory .
-    readdir(dir); // Skips directory ..
     while ((entry = readdir(dir)) != NULL)
     {
+        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
+            continue;
         strtok(entry->d_name, delim);
         strcpy(topic_name, strtok(NULL, delim));
         strcpy(topic_id, strtok(NULL, delim));
@@ -424,7 +424,9 @@ int topicPropose(char *buffer, int *id, char *response)
             else
                 sprintf(pathname, "server/topics/%d_%s_%d", topic_amount, topic_name, *id);
             printf("%s\n", pathname);
-            if (mkdir(pathname, 0666) == -1) // Enables R/W for all users
+            if (mkdir(pathname, 0777) == -1) // Enables R/W for all users
+                return -1;
+            if (chmod(pathname, 0777) == -1)
                 return -1;
             strcpy(response, "PTR OK\n");
         }
@@ -449,20 +451,21 @@ int questionList(char *buffer, char *response)
     // Counts number of questions in a topic
     if ((dir = opendir(pathname)) == NULL)
         return -1;
-    readdir(dir); // Skips directory .
-    readdir(dir); // Skips directory ..
-    while ((entry = readdir(dir)) != NULL)
+    while ((entry = readdir(dir)) != NULL) {
+        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
+            continue;
         question_amount++;
+    }
     closedir(dir);
     sprintf(response, "LQR %d", question_amount);
 
     // Lists all the questions in a topic
     if ((dir = opendir(pathname)) == NULL)
         return -1;
-    readdir(dir); // Skips directory .
-    readdir(dir); // Skips directory ..
     while ((entry = readdir(dir)) != NULL)
     {
+        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
+            continue;
         strcpy(question_path, pathname);
         strcat(question_path, "/");
         strcat(question_path, entry->d_name);
@@ -726,13 +729,15 @@ int questionSubmit(int connfd, char *buffer)
     strcat(pathname, "/");
     strcat(pathname, question_folder);
 
-    if (mkdir(pathname, 0666) == -1) // Enables R/W for all users
+    if (mkdir(pathname, 0777) == -1) // Enables R/W for all users
+        return -1;
+    if (chmod(pathname, 0777) == -1)
         return -1;
 
     // Creates answer count file
     strcpy(path_aux, pathname);
     strcat(path_aux, "/anscount.txt");
-    if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0666)) < 0)
+    if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0777)) < 0)
         return -1;
     if (write(fd, "0", 1) != 1)
         return -1;
@@ -744,7 +749,7 @@ int questionSubmit(int connfd, char *buffer)
     // Creates question info file and writes the data it's reading from the buffer to the file
     strcpy(path_aux, pathname);
     strcat(path_aux, "/qinfo.txt");
-    if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0666)) < 0)
+    if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0777)) < 0)
         return -1;
     ptr = bufferptr;
     readFull(connfd, &bufferptr, qsize);
@@ -790,7 +795,7 @@ int questionSubmit(int connfd, char *buffer)
         strcpy(path_aux, pathname);
         strcat(path_aux, "/qimg.");
         strcat(path_aux, iext);
-        if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0666)) < 0)
+        if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0777)) < 0)
             return -1;
         ptr = bufferptr;
         readFull(connfd, &bufferptr, isize);
@@ -905,7 +910,7 @@ int answerSubmit(int connfd, char *buffer)
     else
         sprintf(answer_name, "0%d_%d.txt", answer_count, auserid);
     strcat(path_aux, answer_name);
-    if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0666)) < 0)
+    if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0777)) < 0)
         return -1;
     ptr = bufferptr;
     readFull(connfd, &bufferptr, asize);
@@ -954,7 +959,7 @@ int answerSubmit(int connfd, char *buffer)
         else
             sprintf(answer_name, "0%d_%d.%s", answer_count, auserid, iext);
         strcat(path_aux, answer_name);
-        if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0666)) < 0)
+        if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0777)) < 0)
             return -1;
         ptr = bufferptr;
         readFull(connfd, &bufferptr, isize);
@@ -1016,6 +1021,7 @@ int receiveUDP(int udpfd, char *buffer, struct sockaddr_in *cliaddr, socklen_t *
 
     if ((n = recvfrom(udpfd, buffer, 2048, 0, (struct sockaddr *)cliaddr, len)) == -1)
         return -1;
+
     buffer[n] = '\0'; // Appends a '\0' to the message so it can be used in strcmp
     sscanf(buffer, "%s", request);
 
@@ -1085,11 +1091,10 @@ int receiveTCP(int connfd, struct sockaddr_in *cliaddr, socklen_t *len)
 
 int main(int argc, char **argv)
 {
-    int listenfd, connfd, udpfd, nready, maxfdp1, errcode;
+    int listenfd, connfd, udpfd, nready, maxfdp1, errcode, port_number;
     char buffer[BUFF_MAX], port[16];
     fd_set rset;
-    struct sockaddr_in cliaddr;
-    struct addrinfo hintstcp, hintsudp, *restcp, *resudp;
+    struct sockaddr_in servaddr, cliaddr;
     socklen_t len;
     struct sigaction act, act2;
     pid_t childpid;
@@ -1097,16 +1102,8 @@ int main(int argc, char **argv)
     struct dirent *entry;
 
     memset(buffer, 0, sizeof buffer);
-
-    // Initializes address info structs
-    memset(&hintstcp, 0, sizeof hintstcp);
-    hintstcp.ai_family = AF_INET;
-    hintstcp.ai_socktype = SOCK_STREAM;
-    hintstcp.ai_flags = AI_PASSIVE | AI_NUMERICSERV;
-    memset(&hintsudp, 0, sizeof hintsudp);
-    hintsudp.ai_family = AF_INET;
-    hintsudp.ai_socktype = SOCK_DGRAM;
-    hintsudp.ai_flags = AI_PASSIVE | AI_NUMERICSERV;
+    memset(&servaddr, 0, sizeof servaddr);
+    memset(&cliaddr, 0, sizeof cliaddr);
 
     // Sets up signal handlers for SIGPIPE and SIGCHLD
     memset(&act, 0, sizeof act);
@@ -1119,33 +1116,36 @@ int main(int argc, char **argv)
         exit(1);
 
     setPort(argc, argv, port);
+    port_number = atoi(port);
 
     // Counts number of topics
     if ((dir = opendir("server/topics")) == NULL)
         exit(1);
-    readdir(dir); // Skips directory .
-    readdir(dir); // Skips directory ..
-    while ((entry = readdir(dir)) != NULL)
+    while ((entry = readdir(dir)) != NULL) {
+        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
+            continue;
         topic_amount++;
+    }
     closedir(dir);
 
-    if ((errcode = getaddrinfo(NULL, port, &hintstcp, &restcp)) != 0)
-        exit(1);
-    if ((errcode = getaddrinfo(NULL, port, &hintsudp, &resudp)) != 0)
+    // Initializes TCP socket
+    if ((listenfd = socket(AF_INET, SOCK_STREAM, 0)) == -1)
         exit(1);
 
-    // Initializes TCP socket
-    if ((listenfd = socket(restcp->ai_family, restcp->ai_socktype, restcp->ai_protocol)) == -1)
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_addr.s_addr = htonl(INADDR_ANY); 
+    servaddr.sin_port = htons(port_number);
+
+    if (bind(listenfd, (struct sockaddr*)&servaddr, sizeof(servaddr)) == -1)
         exit(1);
-    if (bind(listenfd, restcp->ai_addr, restcp->ai_addrlen) == -1)
-        exit(1);
-    if (listen(listenfd, 5) == -1)
+    if (listen(listenfd, 10) == -1)
         exit(1);
 
     // Initializes UDP socket
-    if ((udpfd = socket(resudp->ai_family, resudp->ai_socktype, resudp->ai_protocol)) == -1)
+    if ((udpfd = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
         exit(1);
-    if ((errcode = bind(udpfd, resudp->ai_addr, resudp->ai_addrlen)) == -1)
+
+    if ((errcode = bind(udpfd, (struct sockaddr*)&servaddr, sizeof(servaddr))) == -1)
         exit(1);
 
     FD_ZERO(&rset);
@@ -1194,8 +1194,6 @@ int main(int argc, char **argv)
                 exit(1);
         }
     }
-    freeaddrinfo(restcp);
-    freeaddrinfo(resudp);
     close(listenfd);
     close(udpfd);
     exit(0);
