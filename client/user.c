@@ -53,6 +53,24 @@ void setHostNameAndPort(int argc, char **argv, char *hostname, char *port)
             exit(EXIT_FAILURE);
         }
     }
+    else if (argc == 3)
+    {
+        if (!strcmp(argv[1], "-n"))
+        {
+            strcpy(hostname, argv[2]);
+            strcpy(port, "58039");
+        }
+        else if (!strcmp(argv[1], "-p"))
+        {
+            strcpy(hostname, "localhost");
+            strcpy(port, argv[2]);
+        }
+        else
+        {
+            printf("Invalid command line arguments\n");
+            exit(EXIT_FAILURE);
+        }
+    }
     else
     {
         printf("Invalid command line arguments\n");
@@ -307,17 +325,17 @@ void questionList(char *message, char *response, int udpfd, struct addrinfo *res
         }
     }
 }
-void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr,
-                 char *message, char *response, struct addrinfo *restcp, Topic active_topic, bool selectByNumber)
+void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, char *message,
+                 char *response, struct addrinfo *restcp, Topic active_topic, char* active_question, bool selectByNumber)
 {
     ssize_t message_length;
     FILE *fp;
     char question[11];
     int i, numOfAnswers;
-    char qUserID[6], qsize[128], qIMG[2], qiext[4], qisize[128], garbage[10];
+    char qUserID[6], qsize[128], qIMG[4], qiext[4], qisize[128], garbage[10];
     char *qdata, *qidata, *adata, *aidata, pathname[P_MAX], filename[FILENAME_MAX];
     char qCommand[4], aNumber[4], N[3]; //aNumber[4] WHY doesnt 3 work???
-    char aUserID[6], asize[128], aIMG[2], aiext[4], aisize[128];
+    char aUserID[6], asize[128], aIMG[4], aiext[8], aisize[128];
 
     if (selectByNumber)
     {
@@ -327,6 +345,7 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr,
         sscanf(inputptr, "%s", question_number);
 
         sprintf(message, "LQU %s\n", active_topic.name);
+
         sendUDP(udpfd, &resudp, message, response);
 
         strtok(response, delim);
@@ -342,7 +361,11 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr,
         }
     }
 
-    sscanf(inputptr, "%s", question);
+    else
+        sscanf(inputptr, "%s", question);
+
+    strcpy(active_question, question);
+
     sprintf(message, "GQU %s %s\n", active_topic.name, question);
     message_length = 3 + 1 + strlen(active_topic.name) + 1 + strlen(question) + 1;
     openAndConnectToSocketTCP(restcp, &tcpfd);
@@ -360,8 +383,16 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr,
 
     //mkdir("client/topics", 0777);
     sprintf(pathname, "client/%s", active_topic.name);
-    if (mkdir(pathname, 0777) == -1) // Enables R/W for all users
+    if (mkdir(pathname, 0777) == -1)
+    { // Enables R/W for all users
         printf("%s\n", strerror(errno));
+        return;
+    }
+    if (chmod(pathname, 0777) == -1)
+    {
+        printf("%s\n", strerror(errno));
+        return;
+    }
 
     sprintf(filename, "client/%s/%s.txt", active_topic.name, question);
     fp = fopen(filename, "w");
@@ -376,17 +407,18 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr,
     if (atoi(qIMG))
     {
         readTCP(tcpfd, qiext, ' ');
+        qiext[3] = '\0';
         readTCP(tcpfd, qisize, ' ');
         qidata = malloc(sizeof(char) * atoi(qisize));
         readTCPFull(tcpfd, qidata, atoi(qisize) / sizeof(char));
-        readTCP(tcpfd, garbage, '\n'); // discard space after \n
-
+        readTCP(tcpfd, garbage, ' ');
         sprintf(filename, "client/%s/%s.%s", active_topic.name, question, qiext);
-        printf("%s %s %s\n", active_topic.name, question, qiext);
+
         fp = fopen(filename, "wb");
         if (fp == NULL)
         {
             printf("Error creating qImage file!\n\n");
+            printf("%s\n", strerror(errno));
             return;
         }
         fwrite(qidata, sizeof(char), atoi(qisize) / sizeof(char), fp);
@@ -410,7 +442,14 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr,
         adata = malloc(sizeof(char) * atoi(asize));
         readTCPFull(tcpfd, adata, atoi(asize) / sizeof(char));
         readTCP(tcpfd, garbage, ' '); // discard space after \n
-        readTCP(tcpfd, aIMG, ' ');
+        if (i == numOfAnswers - 1)
+        {
+            readTCPFull(tcpfd, aIMG, sizeof(char));
+            if (aIMG[0] == '1')
+                readTCP(tcpfd, garbage, ' ');
+        }
+        else
+            readTCP(tcpfd, aIMG, ' ');
 
         sprintf(filename, "client/%s/%s_%s.txt", active_topic.name, question, aNumber);
         fp = fopen(filename, "w");
@@ -421,10 +460,12 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr,
         }
         fwrite(adata, sizeof(char), atoi(asize) / sizeof(char), fp);
         fclose(fp);
+        free(adata);
 
         if (atoi(aIMG))
         {
             readTCP(tcpfd, aiext, ' ');
+            aiext[3] = '\0';
             readTCP(tcpfd, aisize, ' ');
             aidata = malloc(sizeof(char) * atoi(aisize));
             readTCPFull(tcpfd, aidata, atoi(aisize) / sizeof(char));
@@ -438,6 +479,11 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr,
             }
             fwrite(aidata, sizeof(char), atoi(aisize) / sizeof(char), fp);
             fclose(fp);
+            if (i == numOfAnswers - 1)
+                readTCP(tcpfd, garbage, '\n');
+            else
+                readTCP(tcpfd, garbage, ' ');
+
             //  printf("%s %s %s %s %s %s %s %s\n", aNumber, aUserID, asize, adata, aIMG, aiext, aisize, aidata);
         }
         else
@@ -456,8 +502,8 @@ void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *
 {
     FILE *fp;
     long int message_length;
-    char question[11], filename[NAME_MAX + 3], imagefilename[NAME_MAX + 3],
-        qdata[2048], iext[4], *message, imgBuffer[1024];
+    char question[16], filename[NAME_MAX + 3], imagefilename[NAME_MAX + 3],
+        qdata[2048], iext[8], *message, imgBuffer[1024];
     ssize_t qsize = 0, isize = 0, n;
 
     imagefilename[0] = '\0';
@@ -476,6 +522,8 @@ void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *
     fseek(fp, 0L, SEEK_SET);
     fread(qdata, sizeof(char) * qsize, 1, fp);
     fclose(fp);
+    qdata[qsize] = '\0';
+    printf("%s\n", qdata);
 
     message_length = 3 + 1 + 5 + 1 + strlen(active_topic.name) +
                      1 + strlen(question) + 1 + getNumberOfDigits(qsize) + 1 +
@@ -503,6 +551,8 @@ void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *
         sprintf(message, "QUS %d %s %s %ld %s 1 %s %ld ",
                 userid, active_topic.name, question, qsize, qdata, iext, isize);
 
+        printf("%s\n", message);
+
         writeTCP(tcpfd, message, &message_length); //write of everything, except image content
         while (isize > 0)                          // write of image content, 1024 characters in each iteration
         {
@@ -522,7 +572,6 @@ void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *
         writeTCP(tcpfd, message, &message_length);
     }
     readTCP(tcpfd, response, '\n');
-    printf("%s\n", response);
 
     close(tcpfd);
     free(message);
@@ -551,6 +600,7 @@ void answerSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *re
     asize = ftell(fp);
     fseek(fp, 0L, SEEK_SET);
     fread(adata, sizeof(char) * asize, 1, fp);
+    adata[asize] = '\0';
     fclose(fp);
 
     message_length = 3 + 1 + 5 + 1 + strlen(active_topic.name) +
@@ -579,6 +629,8 @@ void answerSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *re
         sprintf(message, "ANS %d %s %s %ld %s 1 %s %ld ",
                 userid, active_topic.name, active_question, asize, adata, iext, isize);
 
+        printf("%s\n", message);
+
         writeTCP(tcpfd, message, &message_length); //write of everything, except image content
         while (isize > 0)                          // write of image content, 1024 characters in each iteration
         {
@@ -598,7 +650,6 @@ void answerSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *re
         writeTCP(tcpfd, message, &message_length);
     }
     readTCP(tcpfd, response, '\n');
-    printf("%s\n", response);
 
     close(tcpfd);
     free(message);
@@ -616,13 +667,13 @@ void quit(struct addrinfo *restcp, struct addrinfo *resudp, int udpfd, char *mes
 int main(int argc, char **argv)
 {
     //TROCAR ACTIVE_TOPIC_NUMBER POR ACTIVE_TOPIC
-    Topic topic_list[99 + 1], active_topic; // First entry is left empty to facilitate indexing
+    Topic topic_list[99 + 1]; // active_topic; // First entry is left empty to facilitate indexing
     struct addrinfo hintstcp, hintsudp, *restcp, *resudp;
 
     int tcpfd = 0, udpfd = 0, active_topic_number = 0, number_of_topics = 0, userid = 0;
     struct sigaction act;
 
-    char port[16], hostname[128], buffer[128], input[128], command[128], response[2048], active_question[11];
+    char port[16], hostname[128], buffer[128], input[128], command[128], response[2048], active_question[16];
     char *inputptr, *message;
 
     //memset(topic_list, 0, sizeof topic_list);
@@ -655,7 +706,6 @@ int main(int argc, char **argv)
 
     while (1)
     {
-        printf("\n\nNumber of topics %d\nActive Topic %s\nUserID %d\n\n", number_of_topics, topic_list[active_topic_number].name, userid);
         fgets(input, 2048, stdin);
         if (!strcmp(input, "\n"))
             continue;
@@ -690,9 +740,9 @@ int main(int argc, char **argv)
                          active_topic_number, number_of_topics, topic_list[active_topic_number]);
 
         else if (!strcmp(command, "question_get"))
-            questionGet(tcpfd, udpfd, resudp, inputptr, message, response, restcp, topic_list[active_topic_number], false);
+            questionGet(tcpfd, udpfd, resudp, inputptr, message, response, restcp, topic_list[active_topic_number], active_question, false);
         else if (!strcmp(command, "qg"))
-            questionGet(tcpfd, udpfd, resudp, inputptr, message, response, restcp, topic_list[active_topic_number], true);
+            questionGet(tcpfd, udpfd, resudp, inputptr, message, response, restcp, topic_list[active_topic_number], active_question, true);
 
         else if (!strcmp(command, "question_submit") || !strcmp(command, "qs"))
             questionSubmit(tcpfd, inputptr, response, restcp, userid, topic_list[active_topic_number], active_question);
