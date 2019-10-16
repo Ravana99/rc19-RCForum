@@ -20,6 +20,7 @@
 #include <sys/types.h>
 
 #define P_MAX 512
+#define ID_MAX 8
 
 struct topic
 {
@@ -187,7 +188,7 @@ void writeTCPFull(int fd, char *str, long n)
 
 void registerUser(int *userid, char *inputptr, char *message, char *response, int udpfd, struct addrinfo *resudp)
 {
-    char newID[5];
+    char newID[ID_MAX];
     sscanf(inputptr, "%s", newID);
     sprintf(message, "REG %s\n", newID);
     sendUDP(udpfd, &resudp, message, response);
@@ -222,7 +223,11 @@ void topicList(char *message, char *response, int udpfd, struct addrinfo *resudp
 void topicSelect(char *inputptr, int *active_topic_number, int number_of_topics, Topic *topic_list, bool selectByNumber, char *buffer)
 {
     int tmp_topic_number = 0, i;
-    if (selectByNumber)
+    if (number_of_topics == 0)
+    {
+        printf("Topic list not found\n");
+    }
+    else if (selectByNumber)
     {
         char small_buffer[5];
 
@@ -610,7 +615,8 @@ void quit(struct addrinfo *restcp, struct addrinfo *resudp, int udpfd, char *mes
 
 int main(int argc, char **argv)
 {
-    Topic topic_list[99 + 1]; // First entry is left empty to facilitate indexing
+    //TROCAR ACTIVE_TOPIC_NUMBER POR ACTIVE_TOPIC
+    Topic topic_list[99 + 1], active_topic; // First entry is left empty to facilitate indexing
     struct addrinfo hintstcp, hintsudp, *restcp, *resudp;
 
     int tcpfd = 0, udpfd = 0, active_topic_number = 0, number_of_topics = 0, userid = 0;
@@ -649,7 +655,7 @@ int main(int argc, char **argv)
 
     while (1)
     {
-        //printf("Number of topics %d\nActive Topic %s\nUserID %d\n", number_of_topics, topic_list[active_topic_number].name, userid);
+        printf("\n\nNumber of topics %d\nActive Topic %s\nUserID %d\n\n", number_of_topics, topic_list[active_topic_number].name, userid);
         fgets(input, 2048, stdin);
         if (!strcmp(input, "\n"))
             continue;
@@ -670,9 +676,14 @@ int main(int argc, char **argv)
         else if (!strcmp(command, "ts"))
             topicSelect(inputptr, &active_topic_number, number_of_topics, topic_list, true, buffer);
 
-        else if (userid != 0 && (!strcmp(command, "topic_propose") || !strcmp(command, "tp")))
-            topicPropose(inputptr, message, response, udpfd, resudp,
-                         userid, &active_topic_number, &number_of_topics, topic_list, buffer);
+        else if (!strcmp(command, "topic_propose") || !strcmp(command, "tp"))
+        {
+            if (userid == 0)
+                printf("Please register your userID first\n");
+            else
+                topicPropose(inputptr, message, response, udpfd, resudp,
+                             userid, &active_topic_number, &number_of_topics, topic_list, buffer);
+        }
 
         else if (!strcmp(command, "question_list") || !strcmp(command, "ql"))
             questionList(message, response, udpfd, resudp,
