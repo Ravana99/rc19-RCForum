@@ -547,7 +547,7 @@ void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *
         fseek(fp, 0L, SEEK_SET);
 
         message_length += 3 + 1 + getNumberOfDigits(isize) + 1;
-        message = malloc(sizeof(char) * message_length);
+        message = malloc(sizeof(char) * (message_length + 1));
         sprintf(message, "QUS %d %s %s %ld %s 1 %s %ld ",
                 userid, active_topic.name, question, qsize, qdata, iext, isize);
 
@@ -567,7 +567,7 @@ void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *
     }
     else
     {
-        message = malloc(sizeof(char) * message_length);
+        message = malloc(sizeof(char) * (message_length + 1));
         sprintf(message, "QUS %d %s %s %ld %s 0\n", userid, active_topic.name, question, qsize, qdata);
         writeTCP(tcpfd, message, &message_length);
     }
@@ -625,7 +625,7 @@ void answerSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *re
         fseek(fp, 0L, SEEK_SET);
 
         message_length += 3 + 1 + getNumberOfDigits(isize) + 1;
-        message = malloc(sizeof(char) * message_length);
+        message = malloc(sizeof(char) * (message_length+1));
         sprintf(message, "ANS %d %s %s %ld %s 1 %s %ld ",
                 userid, active_topic.name, active_question, asize, adata, iext, isize);
 
@@ -645,7 +645,7 @@ void answerSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *re
     }
     else
     {
-        message = malloc(sizeof(char) * message_length);
+        message = malloc(sizeof(char) * (message_length+1));
         sprintf(message, "ANS %d %s %s %ld %s 0\n", userid, active_topic.name, active_question, asize, adata);
         writeTCP(tcpfd, message, &message_length);
     }
