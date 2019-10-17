@@ -145,8 +145,7 @@ void writeTCP(int tcpfd, char *buffer, ssize_t *buffer_length)
     {
         if ((n = write(tcpfd, ptr, nleft)) <= 0)
         {
-            write(1, "WERROR\n", 7);
-            printf("%s\n", strerror(errno));
+            printf("Error writing...\n");
             exit(EXIT_FAILURE);
         }
         nleft -= n;
@@ -164,8 +163,7 @@ void readTCP(int tcpfd, char *buffer, char terminalChar)
     {
         if ((n = read(tcpfd, ptr, 1)) == -1)
         {
-            write(1, "RERROR\n", 7);
-            printf("%s\n", strerror(errno));
+            printf("Error reading...\n");
             exit(EXIT_FAILURE);
         }
         ptr += n;
@@ -182,10 +180,14 @@ void readTCPFull(int fd, char *buffer, long n)
     while (n > 0)
     {
         if ((nr = read(fd, ptr, n)) <= 0)
-            exit(1);
+        {
+            printf("Error reading...\n");
+            exit(EXIT_FAILURE);
+        }
         n -= nr;
         ptr += nr;
     }
+    *ptr = '\0';
 }
 
 void writeTCPFull(int fd, char *str, long n)
@@ -195,7 +197,10 @@ void writeTCPFull(int fd, char *str, long n)
     while (n > 0)
     {
         if ((nw = write(fd, ptr, n)) <= 0)
-            exit(1);
+        {
+            printf("Error writing...\n");
+            exit(EXIT_FAILURE);
+        }
         n -= nw;
         ptr += nw;
     }
@@ -312,7 +317,7 @@ void questionList(char *message, char *response, int udpfd, struct addrinfo *res
 
     if (!active_topic_number)
     {
-        printf("Please select a topic first\n");
+        printf("Please select a topic first\n\n");
         return;
     }
 
@@ -389,11 +394,11 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, 
     //printf("%s\n", message);
     writeTCP(tcpfd, message, &message_length);
     readTCP(tcpfd, qCommand, ' ');
-    //printf("QUESTION:%s\n", question);
+    printf("QUESTION:%s\n", qCommand);
 
     readTCPFull(tcpfd, qUserID, 3);
     qUserID[3] = '\0';
-    //printf("USERID:%s\n", qUserID);
+    printf("USERID:%s", qUserID);
     if (!strcmp(qUserID, "ERR"))
     {
         printf("QGR ERR\n\n");
@@ -406,13 +411,15 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, 
     }
     readTCPFull(tcpfd, qUserID + 3, 2);
     qUserID[5] = '\0';
-
+    printf("USERID:%s", qUserID);
     readTCP(tcpfd, qsize, ' ');
     qdata = malloc(sizeof(char) * atoi(qsize));
 
     readTCPFull(tcpfd, qdata, atoi(qsize) / sizeof(char));
+    printf("HERE:%s\n", qCommand);
     readTCP(tcpfd, garbage, ' '); // discard space after \n
     readTCP(tcpfd, qIMG, ' ');
+    printf("HERE:%s\n", qCommand);
     //mkdir("client/topics", 0777);
     sprintf(pathname, "client/%s", active_topic.name);
     if (mkdir(pathname, 0777) == -1)
@@ -439,14 +446,15 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, 
     }
     fwrite(qdata, sizeof(char), atoi(qsize) / sizeof(char), fp);
     fclose(fp);
-
     if (atoi(qIMG))
     {
         readTCP(tcpfd, qiext, ' ');
         qiext[3] = '\0';
         readTCP(tcpfd, qisize, ' ');
         qidata = malloc(sizeof(char) * atoi(qisize));
+        printf("HERE:%s\n", qCommand);
         readTCPFull(tcpfd, qidata, atoi(qisize) / sizeof(char));
+        printf("HERE:%s\n", qCommand);
         readTCP(tcpfd, garbage, ' ');
         sprintf(filename, "client/%s/%s.%s", active_topic.name, question, qiext);
 
@@ -461,7 +469,8 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, 
         fclose(fp);
     }
     readTCP(tcpfd, N, ' ');
-
+    printf("H22ERE:%s\n", qIMG);
+    printf("H22ERE:%s\n", N);
     numOfAnswers = atoi(N);
     for (i = 0; i < numOfAnswers; i++)
     {
@@ -695,7 +704,7 @@ void answerSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *re
 
 void quit(struct addrinfo *restcp, struct addrinfo *resudp, int udpfd, char *message)
 {
-    //free(message);
+    free(message);
     freeaddrinfo(restcp);
     freeaddrinfo(resudp);
     close(udpfd);
