@@ -668,7 +668,7 @@ int questionGet(int connfd, char *buffer)
 
 int questionSubmit(int connfd, char *buffer)
 {
-    int question_count, quserid, n, fd;
+    int question_count, quserid, n, fd, status = 0;
     long qsize, buffersize = BUFF_MAX;
     char *ptr, *bufferptr;
     char topic[F_MAX], question[F_MAX], pathname[P_MAX], path_aux[P_MAX], question_folder[F_MAX];
@@ -683,80 +683,67 @@ int questionSubmit(int connfd, char *buffer)
     *(bufferptr - 1) = ' ';
 
     if (getNumberOfDigits(qsize) > 10)
-    {
-        printf("invalid\n");
-        writeFull(connfd, "QUR NOK\n", strlen("QUR NOK\n"));
-        free(buffer);
-        return 0;
-    }
+        status = 1;
 
     reallocate(&buffersize, qsize, &buffer, &bufferptr);
 
     printf("User %d is trying to submit question %s in topic %s... ", quserid, question, topic);
 
     if (strlen(question) > 10 || !isAlphanumeric(question))
-    {
-        printf("invalid\n");
-        writeFull(connfd, "QUR NOK\n", strlen("QUR NOK\n"));
-        free(buffer);
-        return 0;
-    }
+        status = 1;
 
     findTopic(topic, pathname);
 
     question_count = getQuestionCount(pathname, question);
 
     if (question_count >= 99)
-    {
-        printf("full\n");
-        writeFull(connfd, "QUR FUL\n", strlen("QUR FUL\n"));
-        free(buffer);
-        return 0;
-    }
+        status = 2;
+
     else if (question_count == -1) // Found a duplicate
-    {
-        printf("duplicate\n");
-        writeFull(connfd, "QUR DUP\n", strlen("QUR DUP\n"));
-        free(buffer);
-        return 0;
+        status = 3;
+
+    if (status == 0) {
+        // Creates question folder
+        if (question_count < 9)
+            sprintf(question_folder, "0%d_%s_%d", question_count + 1, question, quserid);
+        else
+            sprintf(question_folder, "%d_%s_%d", question_count + 1, question, quserid);
+        strcat(pathname, "/");
+        strcat(pathname, question_folder);
+
+        if (mkdir(pathname, 0777) == -1) // Enables R/W for all users
+            return -1;
+        if (chmod(pathname, 0777) == -1)
+            return -1;
+
+        // Creates answer count file
+        strcpy(path_aux, pathname);
+        strcat(path_aux, "/anscount.txt");
+        if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0777)) < 0)
+            return -1;
+        if (write(fd, "0", 1) != 1)
+            return -1;
+        if (write(fd, "\n", 1) != 1)
+            return -1;
+        if (close(fd) < 0)
+            return -1;
+
+        // Creates question info file and writes the data it's reading from the buffer to the file
+        strcpy(path_aux, pathname);
+        strcat(path_aux, "/qinfo.txt");
+        if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0777)) < 0)
+            return -1;
+        ptr = bufferptr;
     }
 
-    // Creates question folder
-    if (question_count < 9)
-        sprintf(question_folder, "0%d_%s_%d", question_count + 1, question, quserid);
-    else
-        sprintf(question_folder, "%d_%s_%d", question_count + 1, question, quserid);
-    strcat(pathname, "/");
-    strcat(pathname, question_folder);
-
-    if (mkdir(pathname, 0777) == -1) // Enables R/W for all users
-        return -1;
-    if (chmod(pathname, 0777) == -1)
-        return -1;
-
-    // Creates answer count file
-    strcpy(path_aux, pathname);
-    strcat(path_aux, "/anscount.txt");
-    if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0777)) < 0)
-        return -1;
-    if (write(fd, "0", 1) != 1)
-        return -1;
-    if (write(fd, "\n", 1) != 1)
-        return -1;
-    if (close(fd) < 0)
-        return -1;
-
-    // Creates question info file and writes the data it's reading from the buffer to the file
-    strcpy(path_aux, pathname);
-    strcat(path_aux, "/qinfo.txt");
-    if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0777)) < 0)
-        return -1;
-    ptr = bufferptr;
     readFull(connfd, &bufferptr, qsize);
-    writeFull(fd, ptr, qsize);
 
-    if (close(fd) < 0)
-        return -1;
+    if (status == 0) {
+        writeFull(fd, ptr, qsize);
+
+        if (close(fd) < 0)
+            return -1;
+    }
 
     // Reads space between qdata and qIMG
     if ((n = read(connfd, bufferptr, 1)) <= 0)
@@ -782,41 +769,56 @@ int questionSubmit(int connfd, char *buffer)
         *(bufferptr - 1) = ' ';
 
         if (getNumberOfDigits(isize) > 10 || strlen(iext) != 3)
-        {
-            printf("invalid\n");
-            writeFull(connfd, "QUR NOK\n", strlen("QUR NOK\n"));
-            free(buffer);
-            return 0;
-        }
+            status = 1;
 
         reallocate(&buffersize, isize, &buffer, &bufferptr);
 
-        // Creates image file and writes the data it's reading from the buffer to the file
-        strcpy(path_aux, pathname);
-        strcat(path_aux, "/qimg.");
-        strcat(path_aux, iext);
-        if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0777)) < 0)
-            return -1;
-        ptr = bufferptr;
+        if (status == 0) {
+            // Creates image file and writes the data it's reading from the buffer to the file
+            strcpy(path_aux, pathname);
+            strcat(path_aux, "/qimg.");
+            strcat(path_aux, iext);
+            if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0777)) < 0)
+                return -1;
+            ptr = bufferptr;
+        }
+
         readFull(connfd, &bufferptr, isize);
-        writeFull(fd, ptr, isize);
-        if (close(fd) < 0)
-            return -1;
+
+        if (status == 0) {
+            writeFull(fd, ptr, isize);
+            if (close(fd) < 0)
+                return -1;
+        }
 
         // Reads '\n'
         if ((n = read(connfd, bufferptr, 1)) <= 0)
             return -1;
-        if (*bufferptr == '\n')
+        if (*bufferptr == '\n' && status == 0)
         {
             printf("success\n");
             writeFull(connfd, "QUR OK\n", strlen("QUR OK\n"));
             free(buffer);
             return 0;
         }
-        else
+        else if (status == 1)
         {
-            printf("failure\n");
+            printf("invalid\n");
             writeFull(connfd, "QUR NOK\n", strlen("QUR NOK\n"));
+            free(buffer);
+            return 0;
+        }
+        else if (status == 2)
+        {
+            printf("full\n");
+            writeFull(connfd, "QUR FUL\n", strlen("QUR FUL\n"));
+            free(buffer);
+            return 0;
+        }
+        else if (status == 3)
+        {
+            printf("duplicate\n");
+            writeFull(connfd, "QUR DUP\n", strlen("QUR DUP\n"));
             free(buffer);
             return 0;
         }
@@ -826,34 +828,42 @@ int questionSubmit(int connfd, char *buffer)
         // Reads '\n'
         if ((n = read(connfd, bufferptr, 1)) <= 0)
             return -1;
-        if (*bufferptr == '\n')
+        if (*bufferptr == '\n' && status == 0)
         {
             printf("success\n");
             writeFull(connfd, "QUR OK\n", strlen("QUR OK\n"));
             free(buffer);
             return 0;
         }
-        else
+        else if (status == 1)
         {
-            printf("failure\n");
+            printf("invalid\n");
             writeFull(connfd, "QUR NOK\n", strlen("QUR NOK\n"));
             free(buffer);
             return 0;
         }
+        else if (status == 2)
+        {
+            printf("full\n");
+            writeFull(connfd, "QUR FUL\n", strlen("QUR FUL\n"));
+            free(buffer);
+            return 0;
+        }
+        else if (status == 3)
+        {
+            printf("duplicate\n");
+            writeFull(connfd, "QUR DUP\n", strlen("QUR DUP\n"));
+            free(buffer);
+            return 0;
+        }
     }
-    else
-    {
-        printf("failure\n");
-        writeFull(connfd, "QUR NOK\n", strlen("QUR NOK\n"));
-        free(buffer);
-        return 0;
-    }
+    return 0;
 }
 
 int answerSubmit(int connfd, char *buffer)
 {
     int answer_count = 0;
-    int auserid, n, fd;
+    int auserid, n, fd, status = 0;
     long asize, buffersize = BUFF_MAX;
     char *ptr, *bufferptr;
     char topic[F_MAX], question[F_MAX], pathname[P_MAX], path_aux[P_MAX], answer_name[F_MAX], anscount_str[4];
@@ -868,10 +878,13 @@ int answerSubmit(int connfd, char *buffer)
     *(bufferptr - 1) = ' ';
     if (getNumberOfDigits(asize) > 10)
     {
+        status = 1;
+        /*
         printf("invalid\n");
         writeFull(connfd, "QUR NOK\n", strlen("QUR NOK\n"));
         free(buffer);
         return 0;
+        */
     }
 
     reallocate(&buffersize, asize, &buffer, &bufferptr);
@@ -884,11 +897,15 @@ int answerSubmit(int connfd, char *buffer)
 
     if (answer_count >= 99)
     {
+        status = 2;
+        /*
+        printf("full\n");
         writeFull(connfd, "ANR FUL\n", strlen("ANR FUL\n"));
         free(buffer);
         return 0;
+        */
     }
-    else
+    else if (status == 0)
     {
         // Updates answer count file
         strcpy(path_aux, pathname);
@@ -902,21 +919,27 @@ int answerSubmit(int connfd, char *buffer)
             return -1;
     }
 
-    // Creates answer text file
-    strcpy(path_aux, pathname);
-    strcat(path_aux, "/");
-    if (answer_count > 9)
-        sprintf(answer_name, "%d_%d.txt", answer_count, auserid);
-    else
-        sprintf(answer_name, "0%d_%d.txt", answer_count, auserid);
-    strcat(path_aux, answer_name);
-    if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0777)) < 0)
-        return -1;
-    ptr = bufferptr;
+    if (status == 0) {
+        // Creates answer text file
+        strcpy(path_aux, pathname);
+        strcat(path_aux, "/");
+        if (answer_count > 9)
+            sprintf(answer_name, "%d_%d.txt", answer_count, auserid);
+        else
+            sprintf(answer_name, "0%d_%d.txt", answer_count, auserid);
+        strcat(path_aux, answer_name);
+        if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0777)) < 0)
+            return -1;
+        ptr = bufferptr;
+    }
+
     readFull(connfd, &bufferptr, asize);
-    writeFull(fd, ptr, asize);
-    if (close(fd) < 0)
-        return -1;
+
+    if (status == 0) {
+        writeFull(fd, ptr, asize);
+        if (close(fd) < 0)
+            return -1;
+    }
 
     // Reads space between adata and aIMG
     if ((n = read(connfd, bufferptr, 1)) <= 0)
@@ -943,44 +966,60 @@ int answerSubmit(int connfd, char *buffer)
 
         if (getNumberOfDigits(isize) > 10 || strlen(iext) != 3)
         {
+            status = 1;
+            /*
             printf("invalid\n");
             writeFull(connfd, "QUR NOK\n", strlen("QUR NOK\n"));
             free(buffer);
             return 0;
+            */
         }
 
         reallocate(&buffersize, isize, &buffer, &bufferptr);
 
-        // Creates image file and writes the data it's reading from the buffer to the file
-        strcpy(path_aux, pathname);
-        strcat(path_aux, "/");
-        if (answer_count > 9)
-            sprintf(answer_name, "%d_%d.%s", answer_count, auserid, iext);
-        else
-            sprintf(answer_name, "0%d_%d.%s", answer_count, auserid, iext);
-        strcat(path_aux, answer_name);
-        if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0777)) < 0)
-            return -1;
-        ptr = bufferptr;
+        if (status == 0) {
+            // Creates image file and writes the data it's reading from the buffer to the file
+            strcpy(path_aux, pathname);
+            strcat(path_aux, "/");
+            if (answer_count > 9)
+                sprintf(answer_name, "%d_%d.%s", answer_count, auserid, iext);
+            else
+                sprintf(answer_name, "0%d_%d.%s", answer_count, auserid, iext);
+            strcat(path_aux, answer_name);
+            if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0777)) < 0)
+                return -1;
+            ptr = bufferptr;
+        }
+
         readFull(connfd, &bufferptr, isize);
-        writeFull(fd, ptr, isize);
-        if (close(fd) < 0)
-            return -1;
+
+        if (status == 0) {
+            writeFull(fd, ptr, isize);
+            if (close(fd) < 0)
+                return -1;
+        }
 
         // Reads '\n'
         if ((n = read(connfd, bufferptr, 1)) <= 0)
             return -1;
-        if (*bufferptr == '\n')
+        if (*bufferptr == '\n' && status == 0)
         {
             printf("success\n");
             writeFull(connfd, "ANR OK\n", strlen("ANR OK\n"));
             free(buffer);
             return 0;
         }
-        else
+        else if (status == 1)
         {
-            printf("failure\n");
+            printf("invalid\n");
             writeFull(connfd, "ANR NOK\n", strlen("ANR NOK\n"));
+            free(buffer);
+            return 0;
+        }
+        else if (status == 2)
+        {
+            printf("full\n");
+            writeFull(connfd, "ANR FUL\n", strlen("ANR FUL\n"));
             free(buffer);
             return 0;
         }
@@ -990,28 +1029,29 @@ int answerSubmit(int connfd, char *buffer)
         // Reads '\n'
         if ((n = read(connfd, bufferptr, 1)) <= 0)
             return -1;
-        if (*bufferptr == '\n')
+        if (*bufferptr == '\n' && status == 0)
         {
             printf("success\n");
             writeFull(connfd, "ANR OK\n", strlen("ANR OK\n"));
             free(buffer);
             return 0;
         }
-        else
+        else if (status == 1)
         {
-            printf("failure\n");
+            printf("invalid\n");
             writeFull(connfd, "ANR NOK\n", strlen("ANR NOK\n"));
             free(buffer);
             return 0;
         }
+        else if (status == 2)
+        {
+            printf("full\n");
+            writeFull(connfd, "ANR FUL\n", strlen("ANR FUL\n"));
+            free(buffer);
+            return 0;
+        }
     }
-    else
-    {
-        printf("failure\n");
-        writeFull(connfd, "ANR NOK\n", strlen("ANR NOK\n"));
-        free(buffer);
-        return 0;
-    }
+    return 0;
 }
 
 int receiveUDP(int udpfd, char *buffer, struct sockaddr_in *cliaddr, socklen_t *len)
