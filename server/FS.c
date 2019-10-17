@@ -1118,12 +1118,20 @@ int answerSubmit(int connfd, char *buffer)
 int receiveUDP(int udpfd, char *buffer, struct sockaddr_in *cliaddr, socklen_t *len)
 {
     char request[8], response[BUFF_MAX];
-    int id, n;
+    int id, n, i;
 
     if ((n = recvfrom(udpfd, buffer, 2048, 0, (struct sockaddr *)cliaddr, len)) == -1)
         return -1;
 
     buffer[n] = '\0'; // Appends a '\0' to the message so it can be used in strcmp
+
+    // Checks for double whitespace
+    for (i = 0; i < n-1; i++) {
+        if (buffer[i] == ' ' && isspace(buffer[i+1]))
+            return sendto(udpfd, "ERR\n", strlen("ERR\n"), 0, (struct sockaddr *)cliaddr, *len);
+    }
+
+
     sscanf(buffer, "%s", request);
 
     // register
