@@ -220,7 +220,7 @@ int findAnswer(char *pathname, char *answer, int *id, int i)
 {
     DIR *dir;
     struct dirent *entry;
-    char i_str[4], delim[3] = "_.", aux[4], aid[ID_MAX];
+    char i_str[8], delim[3] = "._", aux[32], aid[ID_MAX];
 
     if (i < 10)
         sprintf(i_str, "0%d", i);
@@ -229,12 +229,15 @@ int findAnswer(char *pathname, char *answer, int *id, int i)
 
     if ((dir = opendir(pathname)) == NULL)
         exit(1);
+
     while ((entry = readdir(dir)) != NULL)
     {
-        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
+        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..") || !strcmp(entry->d_name, "qinfo.txt") || !strcmp(entry->d_name, "anscount.txt"))
             continue;
         strcpy(answer, entry->d_name);
         strcpy(aux, strtok(entry->d_name, delim));
+	if (!strcmp(aux, "qimg"))
+	    continue;
         strcpy(aid, strtok(NULL, delim)); // Gets user ID
         if (!strcmp(i_str, aux))
         {
@@ -494,8 +497,6 @@ int questionGet(int connfd, char *buffer)
     if ((response = (char *)malloc(ressize * sizeof(char))) == NULL)
         return -1;
 
-    write(1, "checkpoint 1\n", 13);
-
     responseptr = &response[0];
     bufferptr = &buffer[4]; // Skips command
 
@@ -511,9 +512,6 @@ int questionGet(int connfd, char *buffer)
         return 0;
     }
 
-    write(1, "checkpoint 2\n", 13);
-    printf("%s\n", buffer);
-
     printf("User is trying to get question %s of topic %s... ", question, topic);
 
     // Opens topic folder
@@ -525,9 +523,7 @@ int questionGet(int connfd, char *buffer)
         free(buffer);
         printf("not found\n");
         return 0;
-    }
-
-    write(1, "checkpoint 3\n", 13);
+    };
 
     // Opens question folder
     if (!findQuestion(question, pathname, &quserid))
@@ -539,14 +535,10 @@ int questionGet(int connfd, char *buffer)
         return 0;
     }
 
-    write(1, "checkpoint 4\n", 13);
-
     answer_count = getAnswerCount(pathname);
     qsize = getFileSize(pathname, "qinfo.txt");
 
     reallocate(&ressize, qsize, &response, &responseptr);
-
-    write(1, "checkpoint 5\n", 13);
 
     sprintf(response, "QGR %d %ld ", quserid, qsize);
     responseptr = response + strlen(response);
@@ -559,8 +551,6 @@ int questionGet(int connfd, char *buffer)
     readFull(fd, &responseptr, qsize);
     if (close(fd) < 0)
         return -1;
-
-    write(1, "checkpoint 6\n", 13);
 
     appendString(&responseptr, " ", 1);
 
@@ -576,8 +566,6 @@ int questionGet(int connfd, char *buffer)
 
         reallocate(&ressize, isize, &response, &responseptr);
 
-        write(1, "checkpoint 7\n", 13);
-
         sprintf(aux, "%ld", isize);
         appendString(&responseptr, aux, strlen(aux));
         appendString(&responseptr, " ", 1);
@@ -591,8 +579,6 @@ int questionGet(int connfd, char *buffer)
         readFull(fd, &responseptr, isize);
         if (close(fd) < 0)
             return -1;
-
-        write(1, "checkpoint 8\n", 13);
 
         appendString(&responseptr, " ", 1);
     }
@@ -614,16 +600,12 @@ int questionGet(int connfd, char *buffer)
 
         findAnswer(pathname, answer, &auserid, i);
 
-        write(1, "checkpoint 9\n", 13);
-
         // Gets size of answer text file
         strcpy(aux, answer);
         strcat(aux, ".txt");
         asize = getFileSize(pathname, aux);
 
         reallocate(&ressize, asize, &response, &responseptr);
-
-        write(1, "checkpoint 10\n", 14);
 
         if (i < 10)
             sprintf(aux, " 0%d %d %ld ", i, auserid, asize);
@@ -642,8 +624,6 @@ int questionGet(int connfd, char *buffer)
         if (close(fd) < 0)
             return -1;
 
-        write(1, "checkpoint 11\n", 14);
-
         appendString(&responseptr, " ", 1);
 
         // Opens image file if one exists
@@ -661,11 +641,7 @@ int questionGet(int connfd, char *buffer)
 
             aisize = getFileSize(pathname, image_name);
 
-            write(1, "checkpoint 12\n", 14);
-
             reallocate(&ressize, aisize, &response, &responseptr);
-
-            write(1, "checkpoint 13\n", 14);
 
             sprintf(aux, "%ld", aisize);
             appendString(&responseptr, aux, strlen(aux));
@@ -680,7 +656,6 @@ int questionGet(int connfd, char *buffer)
             readFull(fd, &responseptr, aisize);
             if (close(fd) < 0)
                 return -1;
-            write(1, "checkpoint 14\n", 14);
         }
         else
         {
@@ -688,9 +663,7 @@ int questionGet(int connfd, char *buffer)
         }
     }
     memcpy(responseptr, "\n", 1);
-    write(1, "checkpoint 15\n", 14);
     writeFull(connfd, response, (long)(responseptr - response + 1));
-    write(1, "checkpoint bu\n", 14);
     printf("success\n");
     free(response);
     free(buffer);
