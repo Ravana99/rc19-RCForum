@@ -49,16 +49,6 @@ int getNumberOfDigits(long n)
     return count;
 }
 
-void reallocate(long *size, long inc, char **str, char **ptr)
-{
-    long aux;
-    *size += inc;
-    aux = *ptr - *str;
-    if ((*str = (char *)realloc(*str, *size * sizeof(char))) == NULL)
-        exit(1);
-    *ptr = *str + aux;
-}
-
 void appendString(char **ptr, char *str, int n)
 {
     memcpy(*ptr, str, n);
@@ -541,8 +531,6 @@ int questionGet(int connfd, char *buffer)
     answer_count = getAnswerCount(pathname);
     qsize = getFileSize(pathname, "qinfo.txt");
 
-    //reallocate(&ressize, qsize, &response, &responseptr);
-
     sprintf(response, "QGR %d %ld ", quserid, qsize);
     responseptr = response + strlen(response);
 
@@ -579,8 +567,6 @@ int questionGet(int connfd, char *buffer)
 
         sprintf(img, "qimg.%s", iext);
         isize = getFileSize(pathname, img);
-
-        //reallocate(&ressize, isize, &response, &responseptr);
 
         sprintf(aux, "%ld", isize);
         appendString(&responseptr, aux, strlen(aux));
@@ -634,8 +620,6 @@ int questionGet(int connfd, char *buffer)
         strcat(aux, ".txt");
         asize = getFileSize(pathname, aux);
 
-        //reallocate(&ressize, asize, &response, &responseptr);
-
         if (i < 10)
             sprintf(aux, " 0%d %d %ld ", i, auserid, asize);
         else
@@ -682,8 +666,6 @@ int questionGet(int connfd, char *buffer)
             strcat(image_name, aiext);
 
             aisize = getFileSize(pathname, image_name);
-
-            //reallocate(&ressize, aisize, &response, &responseptr);
 
             sprintf(aux, "%ld", aisize);
             appendString(&responseptr, aux, strlen(aux));
