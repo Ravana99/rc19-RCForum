@@ -112,8 +112,15 @@ int sendUDP(int udpfd, struct addrinfo **resudp, char *message, char *response)
         return -1;
     addrlen = sizeof(addr);
     n = recvfrom(udpfd, response, 2048, 0, (struct sockaddr *)&addr, &addrlen);
-    if (n == -1)
+    if (n == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
+    {
+        printf("Connection timed out\n");
+        return 0;
+    }
+    else if (n == -1)
+    {
         exit(EXIT_FAILURE);
+    }
     response[n] = '\0'; // Appends a '\0' to the response so it can be used in strcmp
     return n;
 }
@@ -121,27 +128,49 @@ int sendUDP(int udpfd, struct addrinfo **resudp, char *message, char *response)
 void openAndConnectToSocketTCP(struct addrinfo *restcp, int *tcpfd)
 {
 
+    struct timeval tv;
+    tv.tv_sec = 5;
+    tv.tv_usec = 100000;
+
     if ((*tcpfd = socket(restcp->ai_family, restcp->ai_socktype, restcp->ai_protocol)) == -1)
     {
         printf("Socket error\n");
         exit(EXIT_FAILURE);
     }
-    if (connect(*tcpfd, restcp->ai_addr, restcp->ai_addrlen) == -1)
+
+    if (setsockopt(*tcpfd, SOL_SOCKET, SO_SNDTIMEO, (struct timeval *)&tv, sizeof(struct timeval)) < 0)
+    {
+        printf("Error setting socket option\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if (setsockopt(*tcpfd, SOL_SOCKET, SO_RCVTIMEO, (struct timeval *)&tv, sizeof(struct timeval)) < 0)
+    {
+        printf("Error setting socket option\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if (connect(*tcpfd, restcp->ai_addr, restcp->ai_addrlen) < 0)
     {
         printf("Connection error\n");
         exit(1);
     }
 }
 
-void readUntilChar(int tcpfd, char *buffer, char terminalChar)
+void readUntilChar(int fd, char *buffer, char terminalChar)
 {
     ssize_t n;
     char *ptr;
     ptr = buffer;
     do
     {
-        if ((n = read(tcpfd, ptr, 1)) == -1)
+        if ((n = read(fd, ptr, 1)) < 0)
         {
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+            {
+                printf("Connection timed out\n");
+                return;
+            }
             printf("Error reading...\n");
             exit(EXIT_FAILURE);
         }
@@ -150,37 +179,48 @@ void readUntilChar(int tcpfd, char *buffer, char terminalChar)
     *ptr = '\0';
 }
 
-void readMax1024(int fd, char *buffer, long *n)
+int readMax1024(int fd, char *buffer, long *buffer_length)
 {
-    long int nleft, nr;
+    long int nleft, n, totalBytesRead;
     char *ptr;
-    nleft = min(1024, *n) * sizeof(char);
+    nleft = min(1024, *buffer_length) * sizeof(char);
+    totalBytesRead = nleft;
     ptr = buffer;
     while (nleft > 0)
     {
-        if ((nr = read(fd, ptr, *n)) <= 0)
+        if ((n = read(fd, ptr, nleft)) <= 0)
         {
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+            {
+                printf("Connection timed out\n");
+                return -1;
+            }
             printf("Error reading...\n");
             exit(EXIT_FAILURE);
         }
-        nleft -= nr;
-        *n -= nr;
-        ptr += nr;
+        nleft -= n;
+        *buffer_length -= n;
+        ptr += n;
     }
     *ptr = '\0';
+    return totalBytesRead;
 }
 
-void writeMax1024(int tcpfd, char *buffer, ssize_t *buffer_length)
+void writeMax1024(int fd, char *buffer, ssize_t *buffer_length)
 {
     ssize_t nleft, n;
     char *ptr;
     nleft = min(1024, *buffer_length) * sizeof(char);
-    //printf("NLEFT %zu\n%s\n\n", nleft, message);
     ptr = buffer;
     while (nleft > 0)
     {
-        if ((n = write(tcpfd, ptr, nleft)) <= 0)
+        if ((n = write(fd, ptr, nleft)) <= 0)
         {
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+            {
+                printf("Connection timed out\n");
+                return;
+            }
             printf("Error writing...\n");
             exit(EXIT_FAILURE);
         }
@@ -335,16 +375,16 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, 
     ssize_t message_length;
     FILE *fp;
     char question[11];
-    int i, numOfAnswers;
+    int i, numOfAnswers, bytesRead;
     long int size;
-    char qUserID[6], qsize[128], qIMG[4], qiext[4], qisize[128], garbage[10], pathname[P_MAX], filename[FILENAME_MAX];
+    char qUserID[ID_MAX], qsize[128], qIMG[4], qiext[4], qisize[128], garbage[128], pathname[P_MAX], filename[FILENAME_MAX];
     char *data;
     char qCommand[4], aNumber[4], N[3]; //aNumber[4] WHY doesnt 3 work???
     char aUserID[6], asize[128], aIMG[4], aiext[8], aisize[128];
 
     memset(question, 0, sizeof(char) * 11);
     question[10] = '\0';
-    data = malloc(sizeof(char) * 1024);
+    data = malloc(sizeof(char) * 1025);
 
     if (selectByNumber)
     {
@@ -383,15 +423,12 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, 
     sprintf(message, "GQU %s %s\n", active_topic.name, question);
     message_length = 3 + 1 + strlen(active_topic.name) + 1 + strlen(question) + 1;
     openAndConnectToSocketTCP(restcp, &tcpfd);
-    //printf("%s\n", message);
     writeMax1024(tcpfd, message, &message_length);
     readUntilChar(tcpfd, qCommand, ' ');
-    printf("QUESTION:%s\n", qCommand);
 
     size = 3;
     readMax1024(tcpfd, qUserID, &size);
     qUserID[3] = '\0';
-    printf("USERID:%s", qUserID);
     if (!strcmp(qUserID, "ERR"))
     {
         printf("QGR ERR\n\n");
@@ -403,12 +440,12 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, 
         return;
     }
 
-    size = 2;
+    size = 3;
     readMax1024(tcpfd, qUserID + 3, &size);
     qUserID[5] = '\0';
-    printf("USERID:%s", qUserID);
+    //readUntilChar(tcpfd, garbage, ' ');
     readUntilChar(tcpfd, qsize, ' ');
-
+    printf("QSIZE:%s\n", qsize);
     sprintf(pathname, "client/%s", active_topic.name);
     if (mkdir(pathname, 0777) == -1)
     { // Enables R/W for all users
@@ -437,53 +474,55 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, 
     size = atol(qsize);
     while (size > 0)
     {
-        readMax1024(tcpfd, data, &size);
-        fwrite(data, sizeof(char), min(1024, size), fp);
+        bytesRead = readMax1024(tcpfd, data, &size);
+        printf("DATA:%s\n", data);
+        fwrite(data, sizeof(char), bytesRead, fp);
     }
     fclose(fp);
 
-    printf("QDATA:%s\n", data);
     readUntilChar(tcpfd, garbage, ' '); // discard space after \n
     readUntilChar(tcpfd, qIMG, ' ');
-    printf("HERE:%s\n", qCommand);
-    //mkdir("client/topics", 0777);
+    printf("qIMG:%s\n", qIMG);
 
     if (atoi(qIMG))
     {
         readUntilChar(tcpfd, qiext, ' ');
-        qiext[3] = '\0';
+        //qiext[3] = '\0';
+        printf("qIEXT:%s\n", qiext);
         readUntilChar(tcpfd, qisize, ' ');
-        //printf("HERE:%s\n", qCommand);
+        printf("qisize:%s\n", qisize);
         sprintf(filename, "client/%s/%s.%s", active_topic.name, question, qiext);
 
         fp = fopen(filename, "wb");
         if (fp == NULL)
         {
             printf("Error creating question image file!\n\n");
-            printf("%s\n", strerror(errno));
             return;
         }
         size = atol(qisize);
         while (size > 0)
         {
-            readMax1024(tcpfd, data, &size);
-            fwrite(data, sizeof(char), min(1024, size), fp);
+            bytesRead = readMax1024(tcpfd, data, &size);
+            fwrite(data, sizeof(char), bytesRead, fp);
         }
         fclose(fp);
-        //printf("HERE:%s\n", qCommand);
         readUntilChar(tcpfd, garbage, ' ');
     }
     readUntilChar(tcpfd, N, ' ');
-    printf("H22ERE:%s\n", qIMG);
-    printf("H22ERE:%s\n", N);
+    printf("N:%s\n", N);
     numOfAnswers = atoi(N);
     for (i = 0; i < numOfAnswers; i++)
     {
         readUntilChar(tcpfd, aNumber, ' ');
         aNumber[2] = '\0'; //FIX ON aNumber
+        printf("aNumber:%s\n", aNumber);
         readUntilChar(tcpfd, aUserID, ' ');
+        printf("aUserID:%s\n", aUserID);
         readUntilChar(tcpfd, asize, ' ');
+        printf("asize:%s\n", asize);
 
+        sprintf(filename, "client/%s/%s_%s.txt", active_topic.name, question, aNumber);
+        fp = fopen(filename, "w");
         if (fp == NULL)
         {
             printf("Error creating answer file!\n\n");
@@ -492,8 +531,8 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, 
         size = atol(asize);
         while (size > 0)
         {
-            readMax1024(tcpfd, data, &size);
-            fwrite(data, sizeof(char), min(1024, size), fp);
+            bytesRead = readMax1024(tcpfd, data, &size);
+            fwrite(data, sizeof(char), bytesRead, fp);
         }
         fclose(fp);
 
@@ -502,50 +541,50 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, 
         {
             size = 1;
             readMax1024(tcpfd, aIMG, &size);
+            //printf("aIMG:%s\n", aIMG);
             if (aIMG[0] == '1')
                 readUntilChar(tcpfd, garbage, ' ');
         }
         else
             readUntilChar(tcpfd, aIMG, ' ');
-
-        sprintf(filename, "client/%s/%s_%s.txt", active_topic.name, question, aNumber);
-        fp = fopen(filename, "w");
+        printf("aIMG:%s\n", aIMG);
 
         if (atoi(aIMG))
         {
             readUntilChar(tcpfd, aiext, ' ');
             aiext[3] = '\0';
+            printf("aIEXT:%s\n", aiext);
             readUntilChar(tcpfd, aisize, ' ');
+            printf("aisize:%s\n", aisize);
 
+            sprintf(filename, "client/%s/%s_%s.%s", active_topic.name, question, aNumber, aiext);
+            fp = fopen(filename, "w");
             if (fp == NULL)
             {
                 printf("Error creating answer image file!\n\n");
                 return;
             }
-            size = atol(asize);
+            size = atol(aisize);
             while (size > 0)
             {
-                readMax1024(tcpfd, data, &size);
-                fwrite(data, sizeof(char), min(1024, size), fp);
+                bytesRead = readMax1024(tcpfd, data, &size);
+                fwrite(data, sizeof(char), bytesRead, fp);
             }
             fclose(fp);
 
-            sprintf(filename, "client/%s/%s_%s.%s", active_topic.name, question, aNumber, aiext);
-
-            if (i == numOfAnswers - 1)
-                readUntilChar(tcpfd, garbage, '\n');
-            else
-                readUntilChar(tcpfd, garbage, ' ');
+            //printf("garbage:%s\n", garbage);
         }
+        if (i == numOfAnswers - 1)
+            readUntilChar(tcpfd, garbage, '\n');
+        else
+            readUntilChar(tcpfd, garbage, ' ');
+        printf("\n");
     }
 
-    printf("Question:%s sucessfully downloaded\n\n", question);
+    printf("Question: %s sucessfully downloaded\n\n", question);
     strcpy(active_question, question);
     close(tcpfd);
-    //free(qdata);
-    //free(qidata);
-    //free(adata);
-    //free(aidata);
+    free(data);
 }
 void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *restcp, int userid, Topic active_topic, char *active_question)
 {
@@ -572,7 +611,6 @@ void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *
     fread(qdata, sizeof(char) * qsize, 1, fp);
     fclose(fp);
     qdata[qsize] = '\0';
-    //printf("%s\n", qdata);
 
     message_length = 3 + 1 + 5 + 1 + strlen(active_topic.name) +
                      1 + strlen(question) + 1 + getNumberOfDigits(qsize) + 1 +
@@ -600,7 +638,6 @@ void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *
         sprintf(message, "QUS %d %s %s %ld %s 1 %s %ld ",
                 userid, active_topic.name, question, qsize, qdata, iext, isize);
 
-        //printf("%s\n", message);
         writeMax1024(tcpfd, message, &message_length); //write of everything, except image content
         while (isize > 0)                              // write of image content, 1024 characters in each iteration
         {
@@ -610,7 +647,6 @@ void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *
         }
         isize = 1;
         writeMax1024(tcpfd, "\n", &isize);
-
         fclose(fp);
     }
     else
@@ -619,8 +655,8 @@ void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *
         sprintf(message, "QUS %d %s %s %ld %s 0\n", userid, active_topic.name, question, qsize, qdata);
         writeMax1024(tcpfd, message, &message_length);
     }
-
     readUntilChar(tcpfd, response, '\n');
+
     if (!strcmp(response, "QUR NOK\n"))
         printf("Failed to submit question - check if question name is alphanumeric and if it's at most 10 characters long\n\n");
     else if (!strcmp(response, "QUR DUP\n"))
@@ -629,6 +665,7 @@ void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *
         printf("Failed to submit question - question list full\n\n");
     else
         printf("Question submited sucessfully\n\n");
+
     close(tcpfd);
     free(message);
 }
@@ -733,11 +770,14 @@ int main(int argc, char **argv)
 
     int tcpfd = 0, udpfd = 0, active_topic_number = 0, number_of_topics = 0, userid = 0;
     struct sigaction act;
+    struct timeval tv;
 
     char port[16], hostname[128], buffer[128], input[128], command[128], response[2048], active_question[16];
     char *inputptr, *message;
 
-    //memset(topic_list, 0, sizeof topic_list);
+    tv.tv_sec = 5;
+    tv.tv_usec = 100000;
+
     message = malloc(sizeof(char) * 2048);
     setHostNameAndPort(argc, argv, hostname, port);
 
@@ -765,6 +805,8 @@ int main(int argc, char **argv)
     if ((udpfd = socket(resudp->ai_family, resudp->ai_socktype, resudp->ai_protocol)) == -1)
         exit(EXIT_FAILURE);
 
+    if (setsockopt(udpfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0)
+        exit(EXIT_FAILURE);
     while (1)
     {
         fgets(input, 2048, stdin);
