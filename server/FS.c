@@ -17,6 +17,7 @@
 #include <fcntl.h>
 
 #define max(A, B) ((A) >= (B) ? (A) : (B))
+#define min(A, B) ((A) <= (B) ? (A) : (B))
 #define BUFF_MAX 2048
 #define P_MAX 512
 #define F_MAX 64
@@ -87,6 +88,7 @@ void readFull(int fd, char **ptr, long n)
     {
         if ((nr = read(fd, *ptr, n)) <= 0)
             exit(1);
+            
         n -= nr;
         *ptr += nr;
     }
@@ -101,6 +103,7 @@ void writeFull(int fd, char *str, long n)
     {
         if ((nw = write(fd, ptr, n)) <= 0)
             exit(1);
+            
         n -= nw;
         ptr += nw;
     }
@@ -492,9 +495,9 @@ int questionGet(int connfd, char *buffer)
     char img[F_MAX], iext[EXT_MAX], aux[64];
     char *response, *responseptr, *bufferptr;
     int answer_count, fd, i, j, quserid = -1;
-    long ressize = BUFF_MAX, qsize, isize;
+    long qsize, isize, nleft;
 
-    if ((response = (char *)malloc(ressize * sizeof(char))) == NULL)
+    if ((response = (char *)malloc(BUFF_MAX * sizeof(char))) == NULL)
         return -1;
 
     responseptr = &response[0];
@@ -538,17 +541,30 @@ int questionGet(int connfd, char *buffer)
     answer_count = getAnswerCount(pathname);
     qsize = getFileSize(pathname, "qinfo.txt");
 
-    reallocate(&ressize, qsize, &response, &responseptr);
+    //reallocate(&ressize, qsize, &response, &responseptr);
 
     sprintf(response, "QGR %d %ld ", quserid, qsize);
     responseptr = response + strlen(response);
+
+    writeFull(connfd, response, strlen(response));
+    responseptr = &response[0];
+    memset(response, 0, BUFF_MAX);
 
     // Opens question text file and reads it
     strcpy(path_aux, pathname);
     strcat(path_aux, "/qinfo.txt");
     if ((fd = open(path_aux, O_RDONLY)) < 0)
         return -1;
-    readFull(fd, &responseptr, qsize);
+    
+    nleft = qsize;
+    while (nleft > 0) {
+        readFull(fd, &responseptr, min(BUFF_MAX, nleft));
+        responseptr = &response[0];
+        writeFull(connfd, responseptr, min(BUFF_MAX, nleft));
+        nleft -= min(BUFF_MAX, nleft);
+        memset(response, 0, BUFF_MAX);
+    }
+
     if (close(fd) < 0)
         return -1;
 
@@ -564,11 +580,15 @@ int questionGet(int connfd, char *buffer)
         sprintf(img, "qimg.%s", iext);
         isize = getFileSize(pathname, img);
 
-        reallocate(&ressize, isize, &response, &responseptr);
+        //reallocate(&ressize, isize, &response, &responseptr);
 
         sprintf(aux, "%ld", isize);
         appendString(&responseptr, aux, strlen(aux));
         appendString(&responseptr, " ", 1);
+
+        writeFull(connfd, response, strlen(response));
+        responseptr = &response[0];
+        memset(response, 0, BUFF_MAX);
 
         // Opens image file and reads it
         strcpy(path_aux, pathname);
@@ -576,7 +596,16 @@ int questionGet(int connfd, char *buffer)
         strcat(path_aux, img);
         if ((fd = open(path_aux, O_RDONLY)) < 0)
             return -1;
-        readFull(fd, &responseptr, isize);
+        
+        nleft = isize;
+        while (nleft > 0) {
+            readFull(fd, &responseptr, min(BUFF_MAX, nleft));
+            responseptr = &response[0];
+            writeFull(connfd, responseptr, min(BUFF_MAX, nleft));
+            nleft -= min(BUFF_MAX, nleft);
+            memset(response, 0, BUFF_MAX);
+        }
+
         if (close(fd) < 0)
             return -1;
 
@@ -605,13 +634,17 @@ int questionGet(int connfd, char *buffer)
         strcat(aux, ".txt");
         asize = getFileSize(pathname, aux);
 
-        reallocate(&ressize, asize, &response, &responseptr);
+        //reallocate(&ressize, asize, &response, &responseptr);
 
         if (i < 10)
             sprintf(aux, " 0%d %d %ld ", i, auserid, asize);
         else
             sprintf(aux, " %d %d %ld ", i, auserid, asize);
         appendString(&responseptr, aux, strlen(aux));
+
+        writeFull(connfd, response, strlen(response));
+        responseptr = &response[0];
+        memset(response, 0, BUFF_MAX);
 
         // Opens answer text file and reads it
         strcpy(path_aux, pathname);
@@ -620,7 +653,16 @@ int questionGet(int connfd, char *buffer)
         strcat(path_aux, ".txt");
         if ((fd = open(path_aux, O_RDONLY)) < 0)
             return -1;
-        readFull(fd, &responseptr, asize);
+        
+        nleft = asize;
+        while (nleft > 0) {
+            readFull(fd, &responseptr, min(BUFF_MAX, nleft));
+            responseptr = &response[0];
+            writeFull(connfd, responseptr, min(BUFF_MAX, nleft));
+            nleft -= min(BUFF_MAX, nleft);
+            memset(response, 0, BUFF_MAX);
+        }
+
         if (close(fd) < 0)
             return -1;
 
@@ -641,19 +683,32 @@ int questionGet(int connfd, char *buffer)
 
             aisize = getFileSize(pathname, image_name);
 
-            reallocate(&ressize, aisize, &response, &responseptr);
+            //reallocate(&ressize, aisize, &response, &responseptr);
 
             sprintf(aux, "%ld", aisize);
             appendString(&responseptr, aux, strlen(aux));
             appendString(&responseptr, " ", 1);
 
-            // Opens image file and reads it
+            writeFull(connfd, response, strlen(response));
+            responseptr = &response[0];
+            memset(response, 0, BUFF_MAX);
+
+            // Opens answer image file and reads it
             strcpy(path_aux, pathname);
             strcat(path_aux, "/");
             strcat(path_aux, image_name);
             if ((fd = open(path_aux, O_RDONLY)) < 0)
                 return -1;
-            readFull(fd, &responseptr, aisize);
+            
+            nleft = aisize;
+            while (nleft > 0) {
+                readFull(fd, &responseptr, min(BUFF_MAX, nleft));
+                responseptr = &response[0];
+                writeFull(connfd, responseptr, min(BUFF_MAX, nleft));
+                nleft -= min(BUFF_MAX, nleft);
+                memset(response, 0, BUFF_MAX);
+            }
+
             if (close(fd) < 0)
                 return -1;
         }
@@ -673,8 +728,8 @@ int questionGet(int connfd, char *buffer)
 int questionSubmit(int connfd, char *buffer)
 {
     int question_count, quserid, n, fd, status = 0;
-    long qsize, buffersize = BUFF_MAX;
-    char *ptr, *bufferptr;
+    long qsize, nleft;
+    char *bufferptr;
     char topic[F_MAX], question[F_MAX], pathname[P_MAX], path_aux[P_MAX], question_folder[2 * F_MAX];
 
     bufferptr = &buffer[4]; // Skips command
@@ -688,8 +743,6 @@ int questionSubmit(int connfd, char *buffer)
 
     if (getNumberOfDigits(qsize) > 10)
         status = 1;
-
-    reallocate(&buffersize, qsize, &buffer, &bufferptr);
 
     printf("User %d is trying to submit question %s in topic %s... ", quserid, question, topic);
 
@@ -733,23 +786,30 @@ int questionSubmit(int connfd, char *buffer)
         if (close(fd) < 0)
             return -1;
 
-        // Creates question info file and writes the data it's reading from the buffer to the file
+        // Creates question info file
         strcpy(path_aux, pathname);
         strcat(path_aux, "/qinfo.txt");
         if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0777)) < 0)
             return -1;
-        ptr = bufferptr;
     }
 
-    readFull(connfd, &bufferptr, qsize);
+    bufferptr = &buffer[0];
+    memset(buffer, 0, BUFF_MAX);
+    nleft = qsize;
+    while (nleft > 0) {
+        readFull(connfd, &bufferptr, min(BUFF_MAX, nleft));
+        bufferptr = &buffer[0];
+        if (status == 0)
+            writeFull(fd, bufferptr, min(BUFF_MAX, nleft));
+        nleft -= min(BUFF_MAX, nleft);
+        memset(buffer, 0, BUFF_MAX);
+    }
 
-    if (status == 0)
-    {
-        writeFull(fd, ptr, qsize);
-
+    if (status == 0) {
         if (close(fd) < 0)
             return -1;
     }
+
 
     // Reads space between qdata and qIMG
     if ((n = read(connfd, bufferptr, 1)) <= 0)
@@ -763,7 +823,6 @@ int questionSubmit(int connfd, char *buffer)
 
     if (*(bufferptr - n) == '1') // Has image to read
     {
-        char *ptr_aux = bufferptr;
         char iext[EXT_MAX];
         long isize;
 
@@ -771,13 +830,11 @@ int questionSubmit(int connfd, char *buffer)
 
         // Scans file info
         *(bufferptr - 1) = '\0';
-        sscanf(ptr_aux, " %s %ld", iext, &isize);
+        sscanf(buffer, " 1 %s %ld", iext, &isize);
         *(bufferptr - 1) = ' ';
 
         if (getNumberOfDigits(isize) > 10 || strlen(iext) != 3)
             status = 1;
-
-        reallocate(&buffersize, isize, &buffer, &bufferptr);
 
         if (status == 0)
         {
@@ -787,14 +844,20 @@ int questionSubmit(int connfd, char *buffer)
             strcat(path_aux, iext);
             if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0777)) < 0)
                 return -1;
-            ptr = bufferptr;
         }
 
-        readFull(connfd, &bufferptr, isize);
-
-        if (status == 0)
-        {
-            writeFull(fd, ptr, isize);
+        bufferptr = &buffer[0];
+        memset(buffer, 0, BUFF_MAX);
+        nleft = isize;
+        while (nleft > 0) {
+            readFull(connfd, &bufferptr, min(BUFF_MAX, nleft));
+            bufferptr = &buffer[0];
+            if (status == 0)
+                writeFull(fd, bufferptr, min(BUFF_MAX, nleft));
+            nleft -= min(BUFF_MAX, nleft);
+            memset(buffer, 0, BUFF_MAX);
+        }
+        if (status == 0) {
             if (close(fd) < 0)
                 return -1;
         }
@@ -872,8 +935,8 @@ int answerSubmit(int connfd, char *buffer)
 {
     int answer_count = 0;
     int auserid, n, fd, status = 0;
-    long asize, buffersize = BUFF_MAX;
-    char *ptr, *bufferptr;
+    long asize, nleft;
+    char *bufferptr;
     char topic[F_MAX], question[F_MAX], pathname[P_MAX], path_aux[P_MAX], answer_name[F_MAX], anscount_str[4];
 
     bufferptr = &buffer[4];
@@ -885,17 +948,7 @@ int answerSubmit(int connfd, char *buffer)
     sscanf(buffer, "ANS %d %s %s %ld", &auserid, topic, question, &asize);
     *(bufferptr - 1) = ' ';
     if (getNumberOfDigits(asize) > 10)
-    {
         status = 1;
-        /*
-        printf("invalid\n");
-        writeFull(connfd, "QUR NOK\n", strlen("QUR NOK\n"));
-        free(buffer);
-        return 0;
-        */
-    }
-
-    reallocate(&buffersize, asize, &buffer, &bufferptr);
 
     printf("User %d is trying to submit answer for question %s in topic %s... ", auserid, question, topic);
 
@@ -904,15 +957,8 @@ int answerSubmit(int connfd, char *buffer)
     answer_count = getAnswerCount(pathname);
 
     if (answer_count >= 99)
-    {
         status = 2;
-        /*
-        printf("full\n");
-        writeFull(connfd, "ANR FUL\n", strlen("ANR FUL\n"));
-        free(buffer);
-        return 0;
-        */
-    }
+
     else if (status == 0)
     {
         // Updates answer count file
@@ -939,14 +985,21 @@ int answerSubmit(int connfd, char *buffer)
         strcat(path_aux, answer_name);
         if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0777)) < 0)
             return -1;
-        ptr = bufferptr;
     }
 
-    readFull(connfd, &bufferptr, asize);
+    bufferptr = &buffer[0];
+    memset(buffer, 0, BUFF_MAX);
+    nleft = asize;
+    while (nleft > 0) {
+        readFull(connfd, &bufferptr, min(BUFF_MAX, nleft));
+        bufferptr = &buffer[0];
+        if (status == 0)
+            writeFull(fd, bufferptr, min(BUFF_MAX, nleft));
+        nleft -= min(BUFF_MAX, nleft);
+        memset(buffer, 0, BUFF_MAX);
+    }
 
-    if (status == 0)
-    {
-        writeFull(fd, ptr, asize);
+    if (status == 0) {
         if (close(fd) < 0)
             return -1;
     }
@@ -966,26 +1019,15 @@ int answerSubmit(int connfd, char *buffer)
         char iext[EXT_MAX];
         long isize;
 
-        ptr = bufferptr;
         readUntil(connfd, &bufferptr, 3, ' ');
 
         // Scans file info
         *(bufferptr - 1) = '\0';
-        sscanf(ptr, " %s %ld", iext, &isize);
+        sscanf(buffer, " 1 %s %ld", iext, &isize);
         *(bufferptr - 1) = ' ';
 
         if (getNumberOfDigits(isize) > 10 || strlen(iext) != 3)
-        {
             status = 1;
-            /*
-            printf("invalid\n");
-            writeFull(connfd, "QUR NOK\n", strlen("QUR NOK\n"));
-            free(buffer);
-            return 0;
-            */
-        }
-
-        reallocate(&buffersize, isize, &buffer, &bufferptr);
 
         if (status == 0)
         {
@@ -999,14 +1041,21 @@ int answerSubmit(int connfd, char *buffer)
             strcat(path_aux, answer_name);
             if ((fd = open(path_aux, O_WRONLY | O_CREAT, 0777)) < 0)
                 return -1;
-            ptr = bufferptr;
         }
 
-        readFull(connfd, &bufferptr, isize);
+        bufferptr = &buffer[0];
+        memset(buffer, 0, BUFF_MAX);
+        nleft = isize;
+        while (nleft > 0) {
+            readFull(connfd, &bufferptr, min(BUFF_MAX, nleft));
+            bufferptr = &buffer[0];
+            if (status == 0)
+                writeFull(fd, bufferptr, min(BUFF_MAX, nleft));
+            nleft -= min(BUFF_MAX, nleft);
+            memset(buffer, 0, BUFF_MAX);
+        }
 
-        if (status == 0)
-        {
-            writeFull(fd, ptr, isize);
+        if (status == 0) {
             if (close(fd) < 0)
                 return -1;
         }
