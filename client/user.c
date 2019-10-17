@@ -416,7 +416,7 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, 
     qdata = malloc(sizeof(char) * atoi(qsize));
 
     readTCPFull(tcpfd, qdata, atoi(qsize) / sizeof(char));
-    printf("HERE:%s\n", qCommand);
+    printf("QDATA:%s", qdata);
     readTCP(tcpfd, garbage, ' '); // discard space after \n
     readTCP(tcpfd, qIMG, ' ');
     printf("HERE:%s\n", qCommand);
