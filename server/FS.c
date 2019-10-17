@@ -365,7 +365,7 @@ int topicList(char *response)
 {
     DIR *dir;
     struct dirent *entry;
-    char topic_buffer[F_MAX], topic_name[F_MAX], topic_id[ID_MAX];
+    char topic_buffer[2 * F_MAX], topic_name[F_MAX], topic_id[ID_MAX];
     char delim[2] = "_";
 
     printf("User is listing the available topics\n");
@@ -438,7 +438,7 @@ int questionList(char *buffer, char *response)
 {
     DIR *dir;
     struct dirent *entry;
-    char question_buffer[F_MAX], topic_name[F_MAX], pathname[P_MAX], question_name[F_MAX];
+    char question_buffer[2 * F_MAX], topic_name[F_MAX], pathname[P_MAX], question_name[F_MAX];
     char question_id[ID_MAX], question_path[P_MAX], delim[2] = "_";
     int question_amount = 0, answer_amount = 0;
 
@@ -451,7 +451,8 @@ int questionList(char *buffer, char *response)
     // Counts number of questions in a topic
     if ((dir = opendir(pathname)) == NULL)
         return -1;
-    while ((entry = readdir(dir)) != NULL) {
+    while ((entry = readdir(dir)) != NULL)
+    {
         if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
             continue;
         question_amount++;
@@ -671,7 +672,7 @@ int questionSubmit(int connfd, char *buffer)
     int question_count, quserid, n, fd, status = 0;
     long qsize, buffersize = BUFF_MAX;
     char *ptr, *bufferptr;
-    char topic[F_MAX], question[F_MAX], pathname[P_MAX], path_aux[P_MAX], question_folder[F_MAX];
+    char topic[F_MAX], question[F_MAX], pathname[P_MAX], path_aux[P_MAX], question_folder[2 * F_MAX];
 
     bufferptr = &buffer[4]; // Skips command
 
@@ -702,7 +703,8 @@ int questionSubmit(int connfd, char *buffer)
     else if (question_count == -1) // Found a duplicate
         status = 3;
 
-    if (status == 0) {
+    if (status == 0)
+    {
         // Creates question folder
         if (question_count < 9)
             sprintf(question_folder, "0%d_%s_%d", question_count + 1, question, quserid);
@@ -738,7 +740,8 @@ int questionSubmit(int connfd, char *buffer)
 
     readFull(connfd, &bufferptr, qsize);
 
-    if (status == 0) {
+    if (status == 0)
+    {
         writeFull(fd, ptr, qsize);
 
         if (close(fd) < 0)
@@ -773,7 +776,8 @@ int questionSubmit(int connfd, char *buffer)
 
         reallocate(&buffersize, isize, &buffer, &bufferptr);
 
-        if (status == 0) {
+        if (status == 0)
+        {
             // Creates image file and writes the data it's reading from the buffer to the file
             strcpy(path_aux, pathname);
             strcat(path_aux, "/qimg.");
@@ -785,7 +789,8 @@ int questionSubmit(int connfd, char *buffer)
 
         readFull(connfd, &bufferptr, isize);
 
-        if (status == 0) {
+        if (status == 0)
+        {
             writeFull(fd, ptr, isize);
             if (close(fd) < 0)
                 return -1;
@@ -919,7 +924,8 @@ int answerSubmit(int connfd, char *buffer)
             return -1;
     }
 
-    if (status == 0) {
+    if (status == 0)
+    {
         // Creates answer text file
         strcpy(path_aux, pathname);
         strcat(path_aux, "/");
@@ -935,7 +941,8 @@ int answerSubmit(int connfd, char *buffer)
 
     readFull(connfd, &bufferptr, asize);
 
-    if (status == 0) {
+    if (status == 0)
+    {
         writeFull(fd, ptr, asize);
         if (close(fd) < 0)
             return -1;
@@ -977,7 +984,8 @@ int answerSubmit(int connfd, char *buffer)
 
         reallocate(&buffersize, isize, &buffer, &bufferptr);
 
-        if (status == 0) {
+        if (status == 0)
+        {
             // Creates image file and writes the data it's reading from the buffer to the file
             strcpy(path_aux, pathname);
             strcat(path_aux, "/");
@@ -993,7 +1001,8 @@ int answerSubmit(int connfd, char *buffer)
 
         readFull(connfd, &bufferptr, isize);
 
-        if (status == 0) {
+        if (status == 0)
+        {
             writeFull(fd, ptr, isize);
             if (close(fd) < 0)
                 return -1;
@@ -1161,7 +1170,8 @@ int main(int argc, char **argv)
     // Counts number of topics
     if ((dir = opendir("server/topics")) == NULL)
         exit(1);
-    while ((entry = readdir(dir)) != NULL) {
+    while ((entry = readdir(dir)) != NULL)
+    {
         if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
             continue;
         topic_amount++;
@@ -1173,10 +1183,10 @@ int main(int argc, char **argv)
         exit(1);
 
     servaddr.sin_family = AF_INET;
-    servaddr.sin_addr.s_addr = htonl(INADDR_ANY); 
+    servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
     servaddr.sin_port = htons(port_number);
 
-    if (bind(listenfd, (struct sockaddr*)&servaddr, sizeof(servaddr)) == -1)
+    if (bind(listenfd, (struct sockaddr *)&servaddr, sizeof(servaddr)) == -1)
         exit(1);
     if (listen(listenfd, 10) == -1)
         exit(1);
@@ -1185,7 +1195,7 @@ int main(int argc, char **argv)
     if ((udpfd = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
         exit(1);
 
-    if ((errcode = bind(udpfd, (struct sockaddr*)&servaddr, sizeof(servaddr))) == -1)
+    if ((errcode = bind(udpfd, (struct sockaddr *)&servaddr, sizeof(servaddr))) == -1)
         exit(1);
 
     FD_ZERO(&rset);

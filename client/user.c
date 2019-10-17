@@ -326,36 +326,45 @@ void questionList(char *message, char *response, int udpfd, struct addrinfo *res
     }
 }
 void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, char *message,
-                 char *response, struct addrinfo *restcp, Topic active_topic, char* active_question, bool selectByNumber)
+                 char *response, struct addrinfo *restcp, Topic active_topic, char *active_question, bool selectByNumber)
 {
     ssize_t message_length;
     FILE *fp;
     char question[11];
     int i, numOfAnswers;
-    char qUserID[6], qsize[128], qIMG[4], qiext[4], qisize[128], garbage[10];
-    char *qdata, *qidata, *adata, *aidata, pathname[P_MAX], filename[FILENAME_MAX];
+    char qUserID[6], qsize[128], qIMG[4], qiext[4], qisize[128], garbage[10], pathname[P_MAX], filename[FILENAME_MAX];
+    char *qdata, *qidata, *adata, *aidata;
     char qCommand[4], aNumber[4], N[3]; //aNumber[4] WHY doesnt 3 work???
     char aUserID[6], asize[128], aIMG[4], aiext[8], aisize[128];
 
+    memset(question, 0, sizeof(char) * 11);
+    question[10] = '\0';
     if (selectByNumber)
     {
-        char question_number[6];
+        int question_number, n;
         char delim[3] = ": ";
         int number_of_questions, i;
-        sscanf(inputptr, "%s", question_number);
-
         sprintf(message, "LQU %s\n", active_topic.name);
-
         sendUDP(udpfd, &resudp, message, response);
 
         strtok(response, delim);
         number_of_questions = atoi(strtok(NULL, delim));
-
+        n = sscanf(inputptr, "%d", &question_number);
+        if (n == 0 || n == EOF)
+        {
+            strcpy(question, "$");
+        }
         for (i = 1; i <= number_of_questions; i++)
         {
-            strcpy(question, strtok(NULL, delim));
-            if (i == atoi(question_number))
+            if (i == question_number)
+            {
+                strcpy(question, strtok(NULL, delim));
                 break;
+            }
+            else
+            {
+                strtok(NULL, delim);
+            }
             strtok(NULL, delim);
             strtok(NULL, delim);
         }
@@ -364,30 +373,47 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, 
     else
         sscanf(inputptr, "%s", question);
 
-    strcpy(active_question, question);
-
     sprintf(message, "GQU %s %s\n", active_topic.name, question);
     message_length = 3 + 1 + strlen(active_topic.name) + 1 + strlen(question) + 1;
     openAndConnectToSocketTCP(restcp, &tcpfd);
+    printf("%s\n", message);
     writeTCP(tcpfd, message, &message_length);
     readTCP(tcpfd, qCommand, ' ');
-    readTCP(tcpfd, qUserID, ' ');
+    //printf("QUESTION:%s\n", question);
+
+    readTCPFull(tcpfd, qUserID, 3);
+    qUserID[3] = '\0';
+    //printf("USERID:%s\n", qUserID);
+    if (!strcmp(qUserID, "ERR"))
+    {
+        printf("QGR ERR\n");
+        return;
+    }
+    else if (!strcmp(qUserID, "EOF"))
+    {
+        printf("QGR EOF\n");
+        return;
+    }
+    readTCPFull(tcpfd, qUserID + 3, 2);
+    qUserID[5] = '\0';
+
     readTCP(tcpfd, qsize, ' ');
     qdata = malloc(sizeof(char) * atoi(qsize));
 
     readTCPFull(tcpfd, qdata, atoi(qsize) / sizeof(char));
-    //printf("SIZE%d\n\n", atoi(qsize));
     readTCP(tcpfd, garbage, ' '); // discard space after \n
     readTCP(tcpfd, qIMG, ' ');
-    //printf("QIMAGE:%s\n", qIMG);
-
     //mkdir("client/topics", 0777);
     sprintf(pathname, "client/%s", active_topic.name);
     if (mkdir(pathname, 0777) == -1)
     { // Enables R/W for all users
-        printf("%s\n", strerror(errno));
-        return;
+        if (errno != EEXIST)
+        {
+            printf("%s\n", strerror(errno));
+            return;
+        }
     }
+    //set R/W permissions to everyone
     if (chmod(pathname, 0777) == -1)
     {
         printf("%s\n", strerror(errno));
@@ -417,21 +443,15 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, 
         fp = fopen(filename, "wb");
         if (fp == NULL)
         {
-            printf("Error creating qImage file!\n\n");
+            printf("Error creating question image file!\n\n");
             printf("%s\n", strerror(errno));
             return;
         }
         fwrite(qidata, sizeof(char), atoi(qisize) / sizeof(char), fp);
         fclose(fp);
-        //printf("%s %s %s %s %s %s %s %s\n", qCommand, qUserID, qsize, qdata, qIMG, qiext, qisize, qidata);
     }
-    else
-    {
-        //printf("%s %s %s %s %s\n", qCommand, qUserID, qsize, qdata, qIMG);
-    }
-
     readTCP(tcpfd, N, ' ');
-    //printf("%s\n", N);
+
     numOfAnswers = atoi(N);
     for (i = 0; i < numOfAnswers; i++)
     {
@@ -483,15 +503,10 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, 
                 readTCP(tcpfd, garbage, '\n');
             else
                 readTCP(tcpfd, garbage, ' ');
-
-            //  printf("%s %s %s %s %s %s %s %s\n", aNumber, aUserID, asize, adata, aIMG, aiext, aisize, aidata);
-        }
-        else
-        {
-            //printf("%s %s %s %s %s\n", aNumber, aUserID, asize, adata, aIMG);
         }
     }
     printf("FINISHED GETTING FILES\n");
+    strcpy(active_question, question);
     close(tcpfd);
     //free(qdata);
     //free(qidata);
@@ -625,7 +640,7 @@ void answerSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *re
         fseek(fp, 0L, SEEK_SET);
 
         message_length += 3 + 1 + getNumberOfDigits(isize) + 1;
-        message = malloc(sizeof(char) * (message_length+1));
+        message = malloc(sizeof(char) * (message_length + 1));
         sprintf(message, "ANS %d %s %s %ld %s 1 %s %ld ",
                 userid, active_topic.name, active_question, asize, adata, iext, isize);
 
@@ -645,7 +660,7 @@ void answerSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *re
     }
     else
     {
-        message = malloc(sizeof(char) * (message_length+1));
+        message = malloc(sizeof(char) * (message_length + 1));
         sprintf(message, "ANS %d %s %s %ld %s 0\n", userid, active_topic.name, active_question, asize, adata);
         writeTCP(tcpfd, message, &message_length);
     }
