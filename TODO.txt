@@ -3,3 +3,9 @@
 • Timeout for UDP requests
 
 • Fix valgrind client leaks
+
+Read and write in chunks(server & client)
+
+Testar topicList com o nosso server, sem topicos, e ver valor de retorno
+
+If an unexpected protocol message is received, the reply will be “ERR”.

@@ -226,6 +226,11 @@ void topicList(char *message, char *response, int udpfd, struct addrinfo *resudp
 
     strcpy(message, "LTP\n");
     sendUDP(udpfd, &resudp, message, response);
+    if (!strcmp(response, "LTR 0\n"))
+    {
+        printf("No topics are yet available\n\n");
+        return;
+    }
     strtok(response, delim);
     n = atoi(strtok(NULL, delim));
     *number_of_topics = n;
@@ -306,25 +311,30 @@ void questionList(char *message, char *response, int udpfd, struct addrinfo *res
     char delim[3] = ": ";
 
     if (!active_topic_number)
-        printf("No topic selected\n");
-    else
     {
-        sprintf(message, "LQU %s\n", active_topic.name);
-        sendUDP(udpfd, &resudp, message, response);
+        printf("Please select a topic first\n");
+        return;
+    }
 
-        strtok(response, delim);
-        number_of_questions = atoi(strtok(NULL, delim));
-
-        printf("%d questions available for topic %s:\n", number_of_questions, active_topic.name);
-        for (i = 1; i <= number_of_questions; i++)
-        {
-            strcpy(question_name, strtok(NULL, delim));
-            question_id = atoi(strtok(NULL, delim));
-            question_na = atoi(strtok(NULL, delim));
-            printf("%d - %s (proposed by %d) - %d answers\n", i, question_name, question_id, question_na);
-        }
+    sprintf(message, "LQU %s\n", active_topic.name);
+    sendUDP(udpfd, &resudp, message, response);
+    if (!strcmp(response, "LTR 0\n"))
+    {
+        printf("No questions are yet available for this topic\n\n");
+        return;
+    }
+    strtok(response, delim);
+    number_of_questions = atoi(strtok(NULL, delim));
+    printf("%d questions available for topic %s:\n", number_of_questions, active_topic.name);
+    for (i = 1; i <= number_of_questions; i++)
+    {
+        strcpy(question_name, strtok(NULL, delim));
+        question_id = atoi(strtok(NULL, delim));
+        question_na = atoi(strtok(NULL, delim));
+        printf("%d - %s (proposed by %d) - %d answers\n", i, question_name, question_id, question_na);
     }
 }
+
 void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, char *message,
                  char *response, struct addrinfo *restcp, Topic active_topic, char *active_question, bool selectByNumber)
 {
@@ -376,7 +386,7 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, 
     sprintf(message, "GQU %s %s\n", active_topic.name, question);
     message_length = 3 + 1 + strlen(active_topic.name) + 1 + strlen(question) + 1;
     openAndConnectToSocketTCP(restcp, &tcpfd);
-    printf("%s\n", message);
+    //printf("%s\n", message);
     writeTCP(tcpfd, message, &message_length);
     readTCP(tcpfd, qCommand, ' ');
     //printf("QUESTION:%s\n", question);
@@ -386,12 +396,12 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, 
     //printf("USERID:%s\n", qUserID);
     if (!strcmp(qUserID, "ERR"))
     {
-        printf("QGR ERR\n");
+        printf("QGR ERR\n\n");
         return;
     }
     else if (!strcmp(qUserID, "EOF"))
     {
-        printf("QGR EOF\n");
+        printf("QGR EOF\n\n");
         return;
     }
     readTCPFull(tcpfd, qUserID + 3, 2);
@@ -505,7 +515,8 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, 
                 readTCP(tcpfd, garbage, ' ');
         }
     }
-    printf("FINISHED GETTING FILES\n");
+
+    printf("Question:%s sucessfully downloaded\n\n", question);
     strcpy(active_question, question);
     close(tcpfd);
     //free(qdata);
@@ -538,7 +549,7 @@ void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *
     fread(qdata, sizeof(char) * qsize, 1, fp);
     fclose(fp);
     qdata[qsize] = '\0';
-    printf("%s\n", qdata);
+    //printf("%s\n", qdata);
 
     message_length = 3 + 1 + 5 + 1 + strlen(active_topic.name) +
                      1 + strlen(question) + 1 + getNumberOfDigits(qsize) + 1 +
@@ -566,8 +577,7 @@ void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *
         sprintf(message, "QUS %d %s %s %ld %s 1 %s %ld ",
                 userid, active_topic.name, question, qsize, qdata, iext, isize);
 
-        printf("%s\n", message);
-
+        //printf("%s\n", message);
         writeTCP(tcpfd, message, &message_length); //write of everything, except image content
         while (isize > 0)                          // write of image content, 1024 characters in each iteration
         {
@@ -586,8 +596,16 @@ void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *
         sprintf(message, "QUS %d %s %s %ld %s 0\n", userid, active_topic.name, question, qsize, qdata);
         writeTCP(tcpfd, message, &message_length);
     }
-    readTCP(tcpfd, response, '\n');
 
+    readTCP(tcpfd, response, '\n');
+    if (!strcmp(response, "QUR NOK\n"))
+        printf("Failed to submit question - check if question name is alphanumeric and if it's at most 10 characters long\n\n");
+    else if (!strcmp(response, "QUR DUP\n"))
+        printf("Failed to submit question - question already exists\n\n");
+    else if (!strcmp(response, "QUR FUL\n"))
+        printf("Failed to submit question - question list full\n\n");
+    else
+        printf("Question submited sucessfully\n\n");
     close(tcpfd);
     free(message);
 }
@@ -644,8 +662,6 @@ void answerSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *re
         sprintf(message, "ANS %d %s %s %ld %s 1 %s %ld ",
                 userid, active_topic.name, active_question, asize, adata, iext, isize);
 
-        printf("%s\n", message);
-
         writeTCP(tcpfd, message, &message_length); //write of everything, except image content
         while (isize > 0)                          // write of image content, 1024 characters in each iteration
         {
@@ -664,8 +680,15 @@ void answerSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *re
         sprintf(message, "ANS %d %s %s %ld %s 0\n", userid, active_topic.name, active_question, asize, adata);
         writeTCP(tcpfd, message, &message_length);
     }
+
     readTCP(tcpfd, response, '\n');
 
+    if (!strcmp(response, "AMR NOK\n"))
+        printf("Failed to submit answer\n\n");
+    else if (!strcmp(response, "ANR FUL\n"))
+        printf("Failed to submit question - answer list full\n\n");
+    else
+        printf("Answer submited sucessfully\n\n");
     close(tcpfd);
     free(message);
 }
