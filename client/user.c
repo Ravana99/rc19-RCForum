@@ -773,7 +773,6 @@ void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *
     fpfd = fileno(fp);
     while (size > 0)
     {
-        printf("%ld\n", size);
         bytesRead = readMax1024(fpfd, ptrData, &size);
         writeMax1024(tcpfd, ptrData, &bytesRead);
     }
@@ -834,7 +833,7 @@ void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *
     else if (!strcmp(response, "QUR FUL\n"))
         printf("Failed to submit question - question list full\n\n");
     else
-        printf("Question submited sucessfully\n\n");
+        printf("Question submitted successfully\n\n");
 
     close(tcpfd);
     free(data);
@@ -953,7 +952,7 @@ void answerSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *re
     else if (!strcmp(response, "ANR FUL\n"))
         printf("Failed to submit question - answer list full\n\n");
     else
-        printf("Answer submited successfully\n\n");
+        printf("Answer submitted successfully\n\n");
     close(tcpfd);
     free(data);
 }
