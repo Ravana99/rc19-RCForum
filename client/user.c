@@ -32,6 +32,10 @@ struct topic
     int id;
 } typedef Topic;
 
+
+// ------ AUXILIARY FUNCTIONS ------ //
+
+// Reads command line arguments and sets the hostname and port number accordingly
 void setHostNameAndPort(int argc, char **argv, char *hostname, char *port)
 {
     if (argc == 1)
@@ -82,6 +86,7 @@ void setHostNameAndPort(int argc, char **argv, char *hostname, char *port)
     }
 }
 
+// Takes image file name and saves 3-letter extension
 void getImageExtension(char *imagefilename, char *iext)
 {
     int i, j = 0, imagefilename_length = strlen(imagefilename);
@@ -92,6 +97,7 @@ void getImageExtension(char *imagefilename, char *iext)
     iext[j] = '\0';
 }
 
+// Gets number of digits of a certain integer
 int getNumberOfDigits(int number)
 {
     int count = 0;
@@ -103,6 +109,7 @@ int getNumberOfDigits(int number)
     return count;
 }
 
+// Sends message using the UDP protocol and receives answer
 int sendUDP(int udpfd, struct addrinfo **resudp, char *message, char *response)
 {
     struct sockaddr_in addr;
@@ -125,6 +132,7 @@ int sendUDP(int udpfd, struct addrinfo **resudp, char *message, char *response)
     return n;
 }
 
+// Handles TCP socket creation and connection
 void openAndConnectToSocketTCP(struct addrinfo *restcp, int *tcpfd)
 {
 
@@ -141,6 +149,7 @@ void openAndConnectToSocketTCP(struct addrinfo *restcp, int *tcpfd)
     }
 }
 
+// Reads a buffer, byte by byte, until it reaches a given character
 void readUntilChar(int fd, char *buffer, char terminalChar)
 {
     ssize_t n;
@@ -164,6 +173,7 @@ void readUntilChar(int fd, char *buffer, char terminalChar)
     *ptr = '\0';
 }
 
+// Reads a buffer in chunks of up to 1024
 int readMax1024(int fd, char *buffer, long *buffer_length)
 {
     long int nleft, n, totalBytesRead;
@@ -196,6 +206,7 @@ int readMax1024(int fd, char *buffer, long *buffer_length)
     return totalBytesRead;
 }
 
+// Used for double whitespace checking
 bool isNextCharEmptySpace(int fd, char *buffer)
 {
     ssize_t n;
@@ -220,6 +231,7 @@ bool isNextCharEmptySpace(int fd, char *buffer)
         return false;
 }
 
+// Writes to a buffer in chunks of up to 1024
 void writeMax1024(int fd, char *buffer, ssize_t *buffer_length)
 {
     ssize_t nleft, n;
@@ -245,9 +257,7 @@ void writeMax1024(int fd, char *buffer, ssize_t *buffer_length)
     }
 }
 
-/////////////
-//COMMANDS///
-/////////////
+// ------ COMMANDS ------ //
 
 void registerUser(int *userid, char *inputptr, char *message, char *response, int udpfd, struct addrinfo *resudp)
 {
@@ -382,6 +392,7 @@ void questionList(char *message, char *response, int udpfd, struct addrinfo *res
         question_na = atoi(strtok(NULL, delim));
         printf("%d - %s (proposed by %d) - %d answers\n", i, question_name, question_id, question_na);
     }
+    putchar('\n');
 }
 
 void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, char *message,
@@ -394,19 +405,20 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, 
     long int size;
     char qUserID[ID_MAX], qsize[128], qIMG[4], qiext[4], qisize[128], garbage[128], pathname[P_MAX], filename[FILENAME_MAX];
     char *data, *ptrData;
-    char qCommand[4], aNumber[4], N[3]; //aNumber[4] WHY doesnt 3 work???
+    char qCommand[4], aNumber[4], N[3];
     char aUserID[6], asize[128], aIMG[4], aiext[8], aisize[128];
 
     memset(question, 0, sizeof(char) * 11);
     question[10] = '\0';
-    data = (char*)malloc(sizeof(char) * 1026);
+    if ((data = (char*)malloc(sizeof(char) * 1026)) == NULL)
+        exit(EXIT_FAILURE);
 
-    if (selectByNumber)
+    if (selectByNumber) // Server was run with short form "qg"
     {
         int question_number, n;
         char delim[3] = ": ";
         int number_of_questions, i;
-        sprintf(message, "LQU %s\n", active_topic.name);
+        sprintf(message, "LQU %s\n", active_topic.name); // Runs implicit question_list
         sendUDP(udpfd, &resudp, message, response);
 
         strtok(response, delim);
@@ -436,6 +448,8 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, 
         sscanf(inputptr, "%s", question);
 
     sprintf(message, "GQU %s %s\n", active_topic.name, question);
+    printf("Retrieving question %s:\n\n", question);
+    // Message format: command [space] topic [space] question [space]
     message_length = 3 + 1 + strlen(active_topic.name) + 1 + strlen(question) + 1;
     openAndConnectToSocketTCP(restcp, &tcpfd);
     writeMax1024(tcpfd, message, &message_length);
@@ -484,7 +498,7 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, 
             return;
         }
     }
-    //set R/W permissions to everyone
+    // Sets R/W permissions to everyone (in case permissions weren't set correctly by mkdir)
     if (chmod(pathname, 0777) == -1)
     {
         printf("%s\n", strerror(errno));
@@ -515,16 +529,19 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, 
         fwrite(ptrData, sizeof(char), bytesRead, fp);
     }
     fclose(fp);
+    printf("Downloaded %s.txt\n", question);
 
-    readUntilChar(tcpfd, garbage, ' '); // discard space after \n
+    readUntilChar(tcpfd, garbage, ' ');
     if (isNextCharEmptySpace(tcpfd, qIMG))
     {
         printf("QGR ERR\n");
         return;
     }
     readUntilChar(tcpfd, qIMG + 1, ' ');
-    if (atoi(qIMG))
+
+    if (atoi(qIMG)) // Has image to write
     {
+        printf("Has image:\n");
         if (isNextCharEmptySpace(tcpfd, qiext))
         {
             printf("QGR ERR\n");
@@ -561,6 +578,7 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, 
             fwrite(ptrData, sizeof(char), bytesRead, fp);
         }
         fclose(fp);
+        printf("Downloaded %s.%s\n", question, qiext);
         readUntilChar(tcpfd, garbage, ' ');
     }
     if (isNextCharEmptySpace(tcpfd, N))
@@ -583,8 +601,10 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, 
             readUntilChar(tcpfd, garbage, ' ');
         }
         numOfAnswers = atoi(N);
+        printf("\nRetrieving %d answers:\n", numOfAnswers);
         for (i = 0; i < numOfAnswers; i++)
         {
+            printf("\n");
             if (isNextCharEmptySpace(tcpfd, aNumber))
             {
                 printf("QGR ERR\n");
@@ -627,8 +647,9 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, 
                 fwrite(ptrData, sizeof(char), bytesRead, fp);
             }
             fclose(fp);
+            printf("Downloaded %s_%s.txt\n", question, aNumber);
 
-            readUntilChar(tcpfd, garbage, ' '); // discard space after \n
+            readUntilChar(tcpfd, garbage, ' ');
             if (isNextCharEmptySpace(tcpfd, aIMG))
             {
                 printf("QGR ERR\n");
@@ -638,8 +659,9 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, 
             {
                 break;
             }
-            if (atoi(aIMG))
+            if (atoi(aIMG)) // Has image to write
             {
+                printf("Has image:\n");
                 readUntilChar(tcpfd, garbage, ' ');
                 if (isNextCharEmptySpace(tcpfd, aiext))
                 {
@@ -676,6 +698,7 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, 
                     fwrite(ptrData, sizeof(char), bytesRead, fp);
                 }
                 fclose(fp);
+                printf("Downloaded %s_%s.%s\n", question, aNumber, aiext);
                 if (i != numOfAnswers - 1)
                 {
                     if (!isNextCharEmptySpace(tcpfd, data))
@@ -696,7 +719,7 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, 
         }
         readUntilChar(tcpfd, garbage, '\n');
     }
-    printf("Question: %s successfully downloaded\n\n", question);
+    printf("\nQuestion: %s successfully downloaded\n\n", question);
     strcpy(active_question, question);
     close(tcpfd);
     free(data);
@@ -710,8 +733,9 @@ void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *
     char question[16], filename[NAME_MAX + 3], imagefilename[NAME_MAX + 3],
         *data, iext[8], *message, *ptrData;
 
-    data = (char*)malloc(sizeof(char) * 1025);
-    imagefilename[0] = '\0';
+    if ((data = (char*)malloc(sizeof(char) * 1025)) == NULL)
+        exit(EXIT_FAILURE);
+    imagefilename[0] = '\0'; // Makes string effectively empty
     sscanf(inputptr, "%s %s %s", question, filename, imagefilename);
     strcpy(active_question, question);
 
@@ -728,9 +752,11 @@ void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *
     size = ftell(fp);
     fseek(fp, 0L, SEEK_SET);
 
+    // Message format: command [space] id [space] topic [space] question [space] qsize [space]
     message_length = 3 + 1 + 5 + 1 + strlen(active_topic.name) +
                      1 + strlen(question) + 1 + getNumberOfDigits(size) + 1;
-    message = (char*)malloc(sizeof(char) * (message_length + 1));
+    if ((message = (char*)malloc(sizeof(char) * (message_length + 1))) == NULL)
+        exit(EXIT_FAILURE);
     sprintf(message, "QUS %d %s %s %ld ",
             userid, active_topic.name, question, size);
     writeMax1024(tcpfd, message, &message_length);
@@ -743,7 +769,7 @@ void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *
         writeMax1024(tcpfd, ptrData, &bytesRead);
     }
     fclose(fp);
-    if (imagefilename[0] != '\0')
+    if (imagefilename[0] != '\0') // Has image to read/write
     {
         fp = fopen(imagefilename, "rb");
         if (fp == NULL)
@@ -757,8 +783,10 @@ void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *
         size = ftell(fp);
         fseek(fp, 0L, SEEK_SET);
 
+        // Message format: [space] qimg [space] qiext [space] size [space]
         message_length = 1 + 1 + 1 + 3 + 1 + getNumberOfDigits(size) + 1;
-        message = (char*) malloc((message_length+1) * sizeof(char));
+        if ((message = (char*) malloc((message_length+1) * sizeof(char))) == NULL)
+            exit(EXIT_FAILURE);
         sprintf(message, " 1 %s %ld ", iext, size);
         writeMax1024(tcpfd, message, &message_length);
         while (size > 0)
@@ -802,9 +830,10 @@ void answerSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *re
     char *data, *ptrData;
     ssize_t asize = 0, isize = 0;
 
-    data = (char*) malloc(sizeof(char)*1025);
+    if ((data = (char*) malloc(sizeof(char)*1025)) == NULL)
+        exit(EXIT_FAILURE);
 
-    imagefilename[0] = '\0';
+    imagefilename[0] = '\0'; // Makes string effectively empty
     sscanf(inputptr, "%s %s", filename, imagefilename);
 
     openAndConnectToSocketTCP(restcp, &tcpfd);
@@ -820,11 +849,12 @@ void answerSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *re
     asize = ftell(fp);
     fseek(fp, 0L, SEEK_SET);
 
-
+    // Message format: command [space] id [space] topic [space] question [space] asize [space]
     message_length = 3 + 1 + 5 + 1 + strlen(active_topic.name) +
                      1 + strlen(active_question) + 1 + getNumberOfDigits(asize) + 1;
 
-    message = (char*)malloc(sizeof(char) * (message_length + 1));
+    if ((message = (char*)malloc(sizeof(char) * (message_length + 1))) == NULL)
+        exit(EXIT_FAILURE);
 
     sprintf(message, "ANS %d %s %s %ld ", userid, active_topic.name, active_question, asize);
     writeMax1024(tcpfd, message, &message_length);
@@ -838,7 +868,7 @@ void answerSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *re
     }
     fclose(fp);
 
-    if (imagefilename[0] != '\0')
+    if (imagefilename[0] != '\0') // Has image to read/write
     {
         fp = fopen(imagefilename, "rb");
         if (fp == NULL)
@@ -853,8 +883,10 @@ void answerSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *re
         isize = ftell(fp);
         fseek(fp, 0L, SEEK_SET);
 
+        // Message format: [space] aimg [space] aiext [space] size [space]
         message_length = 1 + 1 + 1 + 3 + 1 + getNumberOfDigits(isize) + 1;
-        message = (char*)malloc(sizeof(char) * (message_length + 1));
+        if ((message = (char*)malloc(sizeof(char) * (message_length + 1))) == NULL)
+            exit(EXIT_FAILURE);
         sprintf(message, " 1 %s %ld ", iext, isize);
 
         writeMax1024(tcpfd, message, &message_length); //write of everything, except image content
@@ -910,7 +942,8 @@ int main(int argc, char **argv)
     tv.tv_sec = 5;
     tv.tv_usec = 100000;
 
-    message = malloc(sizeof(char) * 2048);
+    if ((message = (char*)malloc(sizeof(char) * 2048)) == NULL)
+        exit(EXIT_FAILURE);
     setHostNameAndPort(argc, argv, hostname, port);
 
     memset(&hintstcp, 0, sizeof hintstcp);
