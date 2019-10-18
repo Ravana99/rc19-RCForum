@@ -178,7 +178,7 @@ int readMax1024(int fd, char *buffer, long *buffer_length)
 {
     long int nleft, n, totalBytesRead;
     char *ptr;
-    nleft = min(1024, *buffer_length) * sizeof(char);
+    nleft = min(1024, *buffer_length);
     totalBytesRead = nleft;
     ptr = buffer;
     while (nleft > 0)
@@ -190,7 +190,6 @@ int readMax1024(int fd, char *buffer, long *buffer_length)
                 printf("Connection timed out\n");
                 return -1;
             }
-            printf("\n%d\n\n", errno);
             printf("Error reading...\n");
             exit(EXIT_FAILURE);
         }
@@ -236,7 +235,7 @@ void writeMax1024(int fd, char *buffer, ssize_t *buffer_length)
 {
     ssize_t nleft, n;
     char *ptr;
-    nleft = min(1024, *buffer_length) * sizeof(char);
+    nleft = min(1024, *buffer_length);
     ptr = buffer;
     while (nleft > 0)
     {
@@ -751,6 +750,7 @@ void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *
     fseek(fp, 0L, SEEK_END);
     size = ftell(fp);
     fseek(fp, 0L, SEEK_SET);
+    fclose(fp);
 
     // Message format: command [space] id [space] topic [space] question [space] qsize [space]
     message_length = 3 + 1 + 5 + 1 + strlen(active_topic.name) +
@@ -762,13 +762,23 @@ void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *
     writeMax1024(tcpfd, message, &message_length);
     free(message);
     ptrData = data;
+
+    fp = fopen(filename, "r");
+    if (fp == NULL)
+    {
+        printf("Error opening question file\n\n");
+        return;
+    }
+
     fpfd = fileno(fp);
     while (size > 0)
     {
+        printf("%ld\n", size);
         bytesRead = readMax1024(fpfd, ptrData, &size);
         writeMax1024(tcpfd, ptrData, &bytesRead);
     }
     fclose(fp);
+
     if (imagefilename[0] != '\0') // Has image to read/write
     {
         fp = fopen(imagefilename, "rb");
@@ -782,6 +792,7 @@ void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *
         fseek(fp, 0L, SEEK_END);
         size = ftell(fp);
         fseek(fp, 0L, SEEK_SET);
+        fclose(fp);
 
         // Message format: [space] qimg [space] qiext [space] size [space]
         message_length = 1 + 1 + 1 + 3 + 1 + getNumberOfDigits(size) + 1;
@@ -789,9 +800,19 @@ void questionSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *
             exit(EXIT_FAILURE);
         sprintf(message, " 1 %s %ld ", iext, size);
         writeMax1024(tcpfd, message, &message_length);
+
+        fp = fopen(imagefilename, "r");
+        if (fp == NULL)
+        {
+            printf("Error opening question image file\n\n");
+            return;
+        }
+
+        fpfd = fileno(fp);
+
         while (size > 0)
         {
-            bytesRead = readMax1024(fileno(fp), data, &size);
+            bytesRead = readMax1024(fpfd, data, &size);
             writeMax1024(tcpfd, data, &bytesRead);
         }
         size = 1;
@@ -848,6 +869,7 @@ void answerSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *re
     fseek(fp, 0L, SEEK_END);
     asize = ftell(fp);
     fseek(fp, 0L, SEEK_SET);
+    fclose(fp);
 
     // Message format: command [space] id [space] topic [space] question [space] asize [space]
     message_length = 3 + 1 + 5 + 1 + strlen(active_topic.name) +
@@ -860,6 +882,14 @@ void answerSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *re
     writeMax1024(tcpfd, message, &message_length);
     free(message);
     ptrData = data;
+
+    fp = fopen(filename, "r");
+    if (fp == NULL)
+    {
+        printf("Error opening answer file\n\n");
+        return;
+    }
+
     fpfd = fileno(fp);
     while (asize > 0)
     {
@@ -882,6 +912,7 @@ void answerSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *re
         fseek(fp, 0L, SEEK_END);
         isize = ftell(fp);
         fseek(fp, 0L, SEEK_SET);
+        fclose(fp);
 
         // Message format: [space] aimg [space] aiext [space] size [space]
         message_length = 1 + 1 + 1 + 3 + 1 + getNumberOfDigits(isize) + 1;
@@ -890,9 +921,18 @@ void answerSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *re
         sprintf(message, " 1 %s %ld ", iext, isize);
 
         writeMax1024(tcpfd, message, &message_length); //write of everything, except image content
+
+        fp = fopen(imagefilename, "r");
+        if (fp == NULL)
+        {
+            printf("Error opening question file\n\n");
+            return;
+        }
+        fpfd = fileno(fp);
+
         while (isize > 0)
         {
-            bytesRead = readMax1024(fileno(fp), data, &isize);
+            bytesRead = readMax1024(fpfd, data, &isize);
             writeMax1024(tcpfd, data, &bytesRead);
         }
         isize = 1;
