@@ -176,6 +176,7 @@ void readUntilChar(int fd, char *buffer, char terminalChar)
         }
         ptr += n;
     } while (*(ptr - n) != terminalChar);
+    ptr -= n;
     *ptr = '\0';
 }
 
@@ -204,6 +205,30 @@ int readMax1024(int fd, char *buffer, long *buffer_length)
     }
     *ptr = '\0';
     return totalBytesRead;
+}
+
+bool isNextCharEmptySpace(int fd, char *buffer)
+{
+    ssize_t n;
+    char *ptr;
+    ptr = buffer;
+    if ((n = read(fd, ptr, 1)) < 0)
+    {
+        if (errno == EAGAIN || errno == EWOULDBLOCK)
+        {
+            printf("Connection timed out\n");
+            return -1;
+        }
+        printf("Error reading...\n");
+        exit(EXIT_FAILURE);
+    }
+    ptr++;
+    *ptr = '\0';
+    ptr--;
+    if (*(ptr) == ' ')
+        return true;
+    else
+        return false;
 }
 
 void writeMax1024(int fd, char *buffer, ssize_t *buffer_length)
@@ -378,7 +403,7 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, 
     int i, numOfAnswers, bytesRead;
     long int size;
     char qUserID[ID_MAX], qsize[128], qIMG[4], qiext[4], qisize[128], garbage[128], pathname[P_MAX], filename[FILENAME_MAX];
-    char *data;
+    char *data, *ptrData;
     char qCommand[4], aNumber[4], N[3]; //aNumber[4] WHY doesnt 3 work???
     char aUserID[6], asize[128], aIMG[4], aiext[8], aisize[128];
 
@@ -424,10 +449,21 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, 
     message_length = 3 + 1 + strlen(active_topic.name) + 1 + strlen(question) + 1;
     openAndConnectToSocketTCP(restcp, &tcpfd);
     writeMax1024(tcpfd, message, &message_length);
-    readUntilChar(tcpfd, qCommand, ' ');
 
-    size = 3;
-    readMax1024(tcpfd, qUserID, &size);
+    if (isNextCharEmptySpace(tcpfd, qCommand))
+    {
+        printf("QGR ERR\n");
+        return;
+    }
+    readUntilChar(tcpfd, qCommand + 1, ' ');
+
+    if (isNextCharEmptySpace(tcpfd, qUserID))
+    {
+        printf("QGR ERR\n");
+        return;
+    }
+    size = 2;
+    readMax1024(tcpfd, qUserID + 1, &size);
     qUserID[3] = '\0';
     if (!strcmp(qUserID, "ERR"))
     {
@@ -443,9 +479,12 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, 
     size = 3;
     readMax1024(tcpfd, qUserID + 3, &size);
     qUserID[5] = '\0';
-    //readUntilChar(tcpfd, garbage, ' ');
-    readUntilChar(tcpfd, qsize, ' ');
-    printf("QSIZE:%s\n", qsize);
+    if (isNextCharEmptySpace(tcpfd, qsize))
+    {
+        printf("QGR ERR\n");
+        return;
+    }
+    readUntilChar(tcpfd, qsize + 1, ' ');
     sprintf(pathname, "client/%s", active_topic.name);
     if (mkdir(pathname, 0777) == -1)
     { // Enables R/W for all users
@@ -472,25 +511,42 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, 
     }
 
     size = atol(qsize);
+    if (isNextCharEmptySpace(tcpfd, data))
+    {
+        printf("QGR ERR\n");
+        return;
+    }
+    ptrData = data + 1;
+    size--;
+    fwrite(data, sizeof(char), 1, fp);
     while (size > 0)
     {
-        bytesRead = readMax1024(tcpfd, data, &size);
-        printf("DATA:%s\n", data);
-        fwrite(data, sizeof(char), bytesRead, fp);
+        bytesRead = readMax1024(tcpfd, ptrData, &size);
+        fwrite(ptrData, sizeof(char), bytesRead, fp);
     }
     fclose(fp);
 
     readUntilChar(tcpfd, garbage, ' '); // discard space after \n
-    readUntilChar(tcpfd, qIMG, ' ');
-    printf("qIMG:%s\n", qIMG);
-
+    if (isNextCharEmptySpace(tcpfd, qIMG))
+    {
+        printf("QGR ERR\n");
+        return;
+    }
+    readUntilChar(tcpfd, qIMG + 1, ' ');
     if (atoi(qIMG))
     {
-        readUntilChar(tcpfd, qiext, ' ');
-        //qiext[3] = '\0';
-        printf("qIEXT:%s\n", qiext);
-        readUntilChar(tcpfd, qisize, ' ');
-        printf("qisize:%s\n", qisize);
+        if (isNextCharEmptySpace(tcpfd, qiext))
+        {
+            printf("QGR ERR\n");
+            return;
+        }
+        readUntilChar(tcpfd, qiext + 1, ' ');
+        if (isNextCharEmptySpace(tcpfd, qisize))
+        {
+            printf("QGR ERR\n");
+            return;
+        }
+        readUntilChar(tcpfd, qisize + 1, ' ');
         sprintf(filename, "client/%s/%s.%s", active_topic.name, question, qiext);
 
         fp = fopen(filename, "wb");
@@ -500,87 +556,156 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, 
             return;
         }
         size = atol(qisize);
+        if (isNextCharEmptySpace(tcpfd, data))
+        {
+            printf("QGR ERR\n");
+            return;
+        }
+
+        ptrData = data + 1;
+        size--;
+        fwrite(data, sizeof(char), 1, fp);
         while (size > 0)
         {
-            bytesRead = readMax1024(tcpfd, data, &size);
-            fwrite(data, sizeof(char), bytesRead, fp);
+            bytesRead = readMax1024(tcpfd, ptrData, &size);
+            fwrite(ptrData, sizeof(char), bytesRead, fp);
         }
         fclose(fp);
         readUntilChar(tcpfd, garbage, ' ');
     }
-    readUntilChar(tcpfd, N, ' ');
-    printf("N:%s\n", N);
-    numOfAnswers = atoi(N);
-    for (i = 0; i < numOfAnswers; i++)
+    if (isNextCharEmptySpace(tcpfd, N))
     {
-        readUntilChar(tcpfd, aNumber, ' ');
-        aNumber[2] = '\0'; //FIX ON aNumber
-        printf("aNumber:%s\n", aNumber);
-        readUntilChar(tcpfd, aUserID, ' ');
-        printf("aUserID:%s\n", aUserID);
-        readUntilChar(tcpfd, asize, ' ');
-        printf("asize:%s\n", asize);
-
-        sprintf(filename, "client/%s/%s_%s.txt", active_topic.name, question, aNumber);
-        fp = fopen(filename, "w");
-        if (fp == NULL)
+        printf("QGR ERR\n");
+        return;
+    }
+    if (N[0] == '0')
+    {
+        readUntilChar(tcpfd, garbage, '\n');
+    }
+    else
+    {
+        if (N[0] == '1')
         {
-            printf("Error creating answer file!\n\n");
-            return;
-        }
-        size = atol(asize);
-        while (size > 0)
-        {
-            bytesRead = readMax1024(tcpfd, data, &size);
-            fwrite(data, sizeof(char), bytesRead, fp);
-        }
-        fclose(fp);
-
-        readUntilChar(tcpfd, garbage, ' '); // discard space after \n
-        if (i == numOfAnswers - 1)
-        {
-            size = 1;
-            readMax1024(tcpfd, aIMG, &size);
-            //printf("aIMG:%s\n", aIMG);
-            if (aIMG[0] == '1')
-                readUntilChar(tcpfd, garbage, ' ');
+            readUntilChar(tcpfd, N + 1, ' ');
         }
         else
-            readUntilChar(tcpfd, aIMG, ' ');
-        printf("aIMG:%s\n", aIMG);
-
-        if (atoi(aIMG))
         {
-            readUntilChar(tcpfd, aiext, ' ');
-            aiext[3] = '\0';
-            printf("aIEXT:%s\n", aiext);
-            readUntilChar(tcpfd, aisize, ' ');
-            printf("aisize:%s\n", aisize);
+            readUntilChar(tcpfd, garbage, ' ');
+        }
+        numOfAnswers = atoi(N);
+        for (i = 0; i < numOfAnswers; i++)
+        {
+            if (isNextCharEmptySpace(tcpfd, aNumber))
+            {
+                printf("QGR ERR\n");
+                return;
+            }
 
-            sprintf(filename, "client/%s/%s_%s.%s", active_topic.name, question, aNumber, aiext);
+            readUntilChar(tcpfd, aNumber + 1, ' ');
+
+            if (isNextCharEmptySpace(tcpfd, aUserID))
+            {
+                printf("QGR ERR\n");
+                return;
+            }
+            readUntilChar(tcpfd, aUserID + 1, ' ');
+            if (isNextCharEmptySpace(tcpfd, asize))
+            {
+                printf("QGR ERR\n");
+                return;
+            }
+            readUntilChar(tcpfd, asize + 1, ' ');
+            sprintf(filename, "client/%s/%s_%s.txt", active_topic.name, question, aNumber);
             fp = fopen(filename, "w");
             if (fp == NULL)
             {
-                printf("Error creating answer image file!\n\n");
+                printf("Error creating answer file!\n\n");
                 return;
             }
-            size = atol(aisize);
+            size = atol(asize);
+            if (isNextCharEmptySpace(tcpfd, data))
+            {
+                printf("QGR ERR\n");
+                return;
+            }
+            ptrData = data + 1;
+            size--;
+            fwrite(data, sizeof(char), 1, fp);
             while (size > 0)
             {
-                bytesRead = readMax1024(tcpfd, data, &size);
-                fwrite(data, sizeof(char), bytesRead, fp);
+                bytesRead = readMax1024(tcpfd, ptrData, &size);
+                fwrite(ptrData, sizeof(char), bytesRead, fp);
             }
             fclose(fp);
 
-            //printf("garbage:%s\n", garbage);
+            readUntilChar(tcpfd, garbage, ' '); // discard space after \n
+            if (isNextCharEmptySpace(tcpfd, aIMG))
+            {
+                printf("QGR ERR\n");
+                return;
+            }
+            if ((i == numOfAnswers - 1) && aIMG[0] == '0')
+            {
+                break;
+            }
+            if (atoi(aIMG))
+            {
+                readUntilChar(tcpfd, garbage, ' ');
+                if (isNextCharEmptySpace(tcpfd, aiext))
+                {
+                    printf("QGR ERR\n");
+                    return;
+                }
+                readUntilChar(tcpfd, aiext + 1, ' ');
+                aiext[3] = '\0';
+                if (isNextCharEmptySpace(tcpfd, aisize))
+                {
+                    printf("QGR ERR\n");
+                    return;
+                }
+                readUntilChar(tcpfd, aisize + 1, ' ');
+                sprintf(filename, "client/%s/%s_%s.%s", active_topic.name, question, aNumber, aiext);
+                fp = fopen(filename, "w");
+                if (fp == NULL)
+                {
+                    printf("Error creating answer image file!\n\n");
+                    return;
+                }
+                size = atol(aisize);
+                if (isNextCharEmptySpace(tcpfd, data))
+                {
+                    printf("QGR ERR\n");
+                    return;
+                }
+                ptrData = data + 1;
+                size--;
+                fwrite(data, sizeof(char), 1, fp);
+                while (size > 0)
+                {
+                    bytesRead = readMax1024(tcpfd, ptrData, &size);
+                    fwrite(ptrData, sizeof(char), bytesRead, fp);
+                }
+                fclose(fp);
+                if (i != numOfAnswers - 1)
+                {
+                    if (!isNextCharEmptySpace(tcpfd, data))
+                    {
+                        printf("QGR ERR\n");
+                        return;
+                    }
+                }
+            }
+            else
+            {
+                if (!isNextCharEmptySpace(tcpfd, data))
+                {
+                    printf("QGR ERR\n");
+                    return;
+                }
+            }
         }
-        if (i == numOfAnswers - 1)
-            readUntilChar(tcpfd, garbage, '\n');
-        else
-            readUntilChar(tcpfd, garbage, ' ');
-        printf("\n");
+        readUntilChar(tcpfd, garbage, '\n');
     }
-
     printf("Question: %s sucessfully downloaded\n\n", question);
     strcpy(active_question, question);
     close(tcpfd);
@@ -764,7 +889,6 @@ void quit(struct addrinfo *restcp, struct addrinfo *resudp, int udpfd, char *mes
 
 int main(int argc, char **argv)
 {
-    //TROCAR ACTIVE_TOPIC_NUMBER POR ACTIVE_TOPIC
     Topic topic_list[99 + 1]; // active_topic; // First entry is left empty to facilitate indexing
     struct addrinfo hintstcp, hintsudp, *restcp, *resudp;
 
