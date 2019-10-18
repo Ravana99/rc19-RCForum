@@ -409,7 +409,7 @@ void questionGet(int tcpfd, int udpfd, struct addrinfo *resudp, char *inputptr, 
 
     memset(question, 0, sizeof(char) * 11);
     question[10] = '\0';
-    data = malloc(sizeof(char) * 1025);
+    data = malloc(sizeof(char) * 1026);
 
     if (selectByNumber)
     {
@@ -868,7 +868,7 @@ void answerSubmit(int tcpfd, char *inputptr, char *response, struct addrinfo *re
 
     readUntilChar(tcpfd, response, '\n');
 
-    if (!strcmp(response, "AMR NOK\n"))
+    if (!strcmp(response, "ANR NOK\n"))
         printf("Failed to submit answer\n\n");
     else if (!strcmp(response, "ANR FUL\n"))
         printf("Failed to submit question - answer list full\n\n");
@@ -972,16 +972,25 @@ int main(int argc, char **argv)
             questionGet(tcpfd, udpfd, resudp, inputptr, message, response, restcp, topic_list[active_topic_number], active_question, true);
 
         else if (!strcmp(command, "question_submit") || !strcmp(command, "qs"))
-            questionSubmit(tcpfd, inputptr, response, restcp, userid, topic_list[active_topic_number], active_question);
+        {
+            if (userid == 0)
+                printf("Please register your userID first\n");
+            else
+                questionSubmit(tcpfd, inputptr, response, restcp, userid, topic_list[active_topic_number], active_question);
+        }
 
         else if (!strcmp(command, "answer_submit") || !strcmp(command, "as"))
-            answerSubmit(tcpfd, inputptr, response, restcp, userid, topic_list[active_topic_number], active_question);
+        {
+            if (userid == 0)
+                printf("Please register your userID first\n");
+            else
+                answerSubmit(tcpfd, inputptr, response, restcp, userid, topic_list[active_topic_number], active_question);
+        }
 
         else
             printf("Unknown command\n\n");
 
-        free(message);
-        message = malloc(sizeof(char) * 2048);
+        memset(message, 0, sizeof(char) * 2048);
         memset(response, 0, sizeof(char) * 2048);
         memset(buffer, 0, sizeof buffer);
         memset(input, 0, sizeof input);
